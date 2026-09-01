@@ -63,26 +63,51 @@ exactly the people it is meant to protect.
   interface requires it. Without those rights RefurbMan still produces a report
   and clearly marks what it could not read.
 
+## Run it without installing anything
+
+Both scripts are self-contained. They read the same sources and apply the same
+judgement as the desktop application, and print a report in the terminal.
+
+**Windows.** Open PowerShell as administrator (right click the Start button,
+choose "Terminal (Admin)" or "Windows PowerShell (Admin)"), then paste:
+
+```powershell
+irm https://raw.githubusercontent.com/sudomastery/refurbman/main/scripts/RefurbMan.ps1 | iex
+```
+
+**Linux.**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sudomastery/refurbman/main/scripts/refurbman.sh | sudo bash
+```
+
+Both work without administrator or root as well. The machine is still fully
+identified; what you lose is drive health and the memory slot breakdown, and the
+report says so rather than leaving a gap.
+
+Add `--json` (or `-Json` on Windows) for machine-readable output.
+
+A word on pasting commands from the internet: you should not do this without
+looking first, and that applies here too. Both scripts are plain text in this
+repository, they only read, and they send nothing anywhere. Read them before you
+run them:
+[RefurbMan.ps1](scripts/RefurbMan.ps1), [refurbman.sh](scripts/refurbman.sh).
+
+### Why not just use Task Manager or a specs tool?
+
+On Windows, the processor name those tools show comes from
+`HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0\ProcessorNameString`.
+That is a registry string, and anyone with administrator rights can rewrite it
+in about ten seconds. Renaming an i3 to an i7 there fools nearly every tool
+people reach for, including Task Manager and the System Information panel.
+
+RefurbMan parses the raw SMBIOS firmware table instead, and on Linux reads the
+brand string the processor itself returns to the `CPUID` instruction.
+
 ## Status
 
-Early development. The probe engine is being built first; the desktop interface
-follows.
-
-## Building
-
-The probe engine has no GUI dependencies:
-
-```
-cargo test -p refurbman-probe
-cargo run  -p refurbman-probe --bin refurbman-probe -- --json
-```
-
-The desktop application additionally needs the Tauri toolchain. On Fedora:
-
-```
-sudo dnf install webkit2gtk4.1-devel gtk3-devel libsoup3-devel \
-                 librsvg2-devel libappindicator-gtk3-devel
-```
+Early development. The two scripts above work today. The probe engine behind
+the desktop application is built and tested; the desktop interface follows.
 
 ## Licence
 

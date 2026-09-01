@@ -279,10 +279,13 @@ mod tests {
     #[test]
     fn trust_summary_counts_across_every_section() {
         let mut r = empty_report();
-        r.system.insert("vendor".into(), firmware("Acme", "smbios:type1"));
-        r.system.insert("os".into(), software("Fedora", "os-release"));
+        r.system
+            .insert("vendor".into(), firmware("Acme", "smbios:type1"));
+        r.system
+            .insert("os".into(), software("Fedora", "os-release"));
         r.components.push(
-            Component::new("cpu", "Ryzen 5 5600U").fact("cores", crate::fact::kernel(6_u32, "sysfs")),
+            Component::new("cpu", "Ryzen 5 5600U")
+                .fact("cores", crate::fact::kernel(6_u32, "sysfs")),
         );
         r.recompute_trust();
 
@@ -303,8 +306,10 @@ mod tests {
     #[test]
     fn weakest_trust_finds_the_soft_link() {
         let mut r = empty_report();
-        r.system.insert("vendor".into(), firmware("Acme", "smbios:type1"));
-        r.system.insert("os".into(), software("Fedora", "os-release"));
+        r.system
+            .insert("vendor".into(), firmware("Acme", "smbios:type1"));
+        r.system
+            .insert("os".into(), software("Fedora", "os-release"));
         assert_eq!(r.weakest_trust(), Some(Trust::Software));
     }
 }

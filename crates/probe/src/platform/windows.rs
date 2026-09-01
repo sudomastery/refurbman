@@ -16,7 +16,9 @@ use crate::report::Facts;
 /// not, so an unelevated Windows scan still identifies the machine fully.
 pub fn is_privileged() -> bool {
     use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::Security::{
+        GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+    };
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     unsafe {

@@ -70,6 +70,7 @@ fn put(facts: &mut Facts, key: &str, value: Option<String>, source: &str) {
 }
 
 /// Everything the SMBIOS tables gave us.
+#[derive(Default)]
 pub struct Smbios {
     /// Machine identity: manufacturer, model, serial, board, BIOS.
     pub system: Facts,
@@ -88,20 +89,6 @@ pub struct Smbios {
     /// Surfaced to the user rather than swallowed, so a short section is never
     /// mistaken for a machine with little in it.
     pub degraded: Option<String>,
-}
-
-impl Default for Smbios {
-    fn default() -> Self {
-        Smbios {
-            system: Facts::new(),
-            memory_slots: Vec::new(),
-            memory_total_bytes: 0,
-            slots_total: 0,
-            slots_populated: 0,
-            cpu_version: None,
-            degraded: None,
-        }
-    }
 }
 
 /// Read and interpret the firmware tables, degrading rather than failing.
@@ -126,16 +113,15 @@ pub fn probe() -> Smbios {
             }
             s
         }
-        Err(e) => {
-            let mut s = Smbios::default();
-            s.system = crate::platform::host::dmi_id_facts();
-            s.degraded = Some(format!(
+        Err(e) => Smbios {
+            system: crate::platform::host::dmi_id_facts(),
+            degraded: Some(format!(
                 "Could not read the raw firmware table ({e}). Machine identity came from \
                  the kernel's DMI export instead; memory slot detail and serial numbers \
                  need a full scan."
-            ));
-            s
-        }
+            )),
+            ..Default::default()
+        },
     }
 }
 
@@ -146,8 +132,18 @@ pub fn interpret(data: &SMBiosData) -> Smbios {
     for undefined in data.iter() {
         match undefined.defined_struct() {
             DefinedStruct::Information(bios) => {
-                put(&mut out.system, "biosVendor", s(&bios.vendor()), "smbios:type0.vendor");
-                put(&mut out.system, "biosVersion", s(&bios.version()), "smbios:type0.bios_version");
+                put(
+                    &mut out.system,
+                    "biosVendor",
+                    s(&bios.vendor()),
+                    "smbios:type0.vendor",
+                );
+                put(
+                    &mut out.system,
+                    "biosVersion",
+                    s(&bios.version()),
+                    "smbios:type0.bios_version",
+                );
                 put(
                     &mut out.system,
                     "biosDate",
@@ -156,16 +152,56 @@ pub fn interpret(data: &SMBiosData) -> Smbios {
                 );
             }
             DefinedStruct::SystemInformation(sys) => {
-                put(&mut out.system, "manufacturer", s(&sys.manufacturer()), "smbios:type1.manufacturer");
-                put(&mut out.system, "model", s(&sys.product_name()), "smbios:type1.product_name");
-                put(&mut out.system, "version", s(&sys.version()), "smbios:type1.version");
-                put(&mut out.system, "serialNumber", s(&sys.serial_number()), "smbios:type1.serial_number");
-                put(&mut out.system, "family", s(&sys.family()), "smbios:type1.family");
+                put(
+                    &mut out.system,
+                    "manufacturer",
+                    s(&sys.manufacturer()),
+                    "smbios:type1.manufacturer",
+                );
+                put(
+                    &mut out.system,
+                    "model",
+                    s(&sys.product_name()),
+                    "smbios:type1.product_name",
+                );
+                put(
+                    &mut out.system,
+                    "version",
+                    s(&sys.version()),
+                    "smbios:type1.version",
+                );
+                put(
+                    &mut out.system,
+                    "serialNumber",
+                    s(&sys.serial_number()),
+                    "smbios:type1.serial_number",
+                );
+                put(
+                    &mut out.system,
+                    "family",
+                    s(&sys.family()),
+                    "smbios:type1.family",
+                );
             }
             DefinedStruct::BaseBoardInformation(board) => {
-                put(&mut out.system, "boardVendor", s(&board.manufacturer()), "smbios:type2.manufacturer");
-                put(&mut out.system, "boardModel", s(&board.product()), "smbios:type2.product");
-                put(&mut out.system, "boardSerial", s(&board.serial_number()), "smbios:type2.serial_number");
+                put(
+                    &mut out.system,
+                    "boardVendor",
+                    s(&board.manufacturer()),
+                    "smbios:type2.manufacturer",
+                );
+                put(
+                    &mut out.system,
+                    "boardModel",
+                    s(&board.product()),
+                    "smbios:type2.product",
+                );
+                put(
+                    &mut out.system,
+                    "boardSerial",
+                    s(&board.serial_number()),
+                    "smbios:type2.serial_number",
+                );
             }
             DefinedStruct::ProcessorInformation(cpu) => {
                 if out.cpu_version.is_none() {
@@ -174,7 +210,8 @@ pub fn interpret(data: &SMBiosData) -> Smbios {
             }
             DefinedStruct::MemoryDevice(mem) => {
                 out.slots_total += 1;
-                let locator = s(&mem.device_locator()).unwrap_or_else(|| format!("Slot {}", out.slots_total));
+                let locator =
+                    s(&mem.device_locator()).unwrap_or_else(|| format!("Slot {}", out.slots_total));
                 let bytes = memory_device_bytes(&mem);
 
                 // An empty slot is worth reporting: "16GB in one of two slots"
@@ -186,17 +223,23 @@ pub fn interpret(data: &SMBiosData) -> Smbios {
                 out.memory_total_bytes += bytes;
 
                 let mut c = Component::new("memory", locator.clone());
-                c.push("sizeBytes", firmware(bytes, "smbios:type17.size").unit("bytes"));
                 c.push(
-                    "slot",
-                    firmware(locator, "smbios:type17.device_locator"),
+                    "sizeBytes",
+                    firmware(bytes, "smbios:type17.size").unit("bytes"),
                 );
+                c.push("slot", firmware(locator, "smbios:type17.device_locator"));
                 if let Some(t) = mem.memory_type() {
-                    c.push("type", firmware(format!("{:?}", t.value), "smbios:type17.memory_type"));
+                    c.push(
+                        "type",
+                        firmware(format!("{:?}", t.value), "smbios:type17.memory_type"),
+                    );
                 }
                 if let Some(sp) = mem.speed() {
                     if let Some(mts) = speed_mts(&sp) {
-                        c.push("speedMts", firmware(mts, "smbios:type17.speed").unit("MT/s"));
+                        c.push(
+                            "speedMts",
+                            firmware(mts, "smbios:type17.speed").unit("MT/s"),
+                        );
                     }
                 }
                 if let Some(sp) = mem.configured_memory_speed() {
@@ -263,6 +306,12 @@ pub fn availability_fact(ok: bool) -> Fact {
     firmware(ok, "smbios:table_load_from_device")
 }
 
+/// Cleaning exposed for the sysfs DMI fallback, which reads the same firmware
+/// fields through a different kernel interface and hits the same OEM junk.
+pub fn clean_public(raw: &str) -> Option<String> {
+    clean(raw)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,10 +332,4 @@ mod tests {
         // Short repeated strings are plausible values, so are kept.
         assert_eq!(clean("AAA"), Some("AAA".into()));
     }
-}
-
-/// Cleaning exposed for the sysfs DMI fallback, which reads the same firmware
-/// fields through a different kernel interface and hits the same OEM junk.
-pub fn clean_public(raw: &str) -> Option<String> {
-    clean(raw)
 }

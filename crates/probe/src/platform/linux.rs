@@ -122,7 +122,10 @@ pub fn os_facts() -> Facts {
     let mut f = Facts::new();
 
     if let Some(v) = read_trimmed("/proc/sys/kernel/osrelease") {
-        f.insert("kernel".into(), kernel(v, "procfs:/proc/sys/kernel/osrelease"));
+        f.insert(
+            "kernel".into(),
+            kernel(v, "procfs:/proc/sys/kernel/osrelease"),
+        );
     }
     // The distribution name is an editable text file, so it is ranked as
     // software and never used to back a hardware claim.

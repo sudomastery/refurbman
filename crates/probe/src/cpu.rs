@@ -47,7 +47,10 @@ pub fn probe() -> Cpu {
     let mut c = Component::new("cpu", name);
 
     if let Some(b) = &brand {
-        c.push("model", device(b.clone(), "cpuid:leaf 0x80000002-4 brand string"));
+        c.push(
+            "model",
+            device(b.clone(), "cpuid:leaf 0x80000002-4 brand string"),
+        );
     }
     if let Some(v) = &vendor {
         c.push("vendor", device(v.clone(), "cpuid:leaf 0x0 vendor id"));
@@ -55,16 +58,28 @@ pub fn probe() -> Cpu {
 
     let mut hypervisor = None;
     if let Some(fi) = cpuid.get_feature_info() {
-        c.push("family", device(u64::from(fi.family_id()), "cpuid:leaf 0x1 family"));
-        c.push("modelId", device(u64::from(fi.model_id()), "cpuid:leaf 0x1 model"));
-        c.push("stepping", device(u64::from(fi.stepping_id()), "cpuid:leaf 0x1 stepping"));
+        c.push(
+            "family",
+            device(u64::from(fi.family_id()), "cpuid:leaf 0x1 family"),
+        );
+        c.push(
+            "modelId",
+            device(u64::from(fi.model_id()), "cpuid:leaf 0x1 model"),
+        );
+        c.push(
+            "stepping",
+            device(u64::from(fi.stepping_id()), "cpuid:leaf 0x1 stepping"),
+        );
 
         if fi.has_hypervisor() {
             let vendor = cpuid
                 .get_hypervisor_info()
                 .map(|h| format!("{:?}", h.identify()))
                 .unwrap_or_else(|| "unidentified".to_owned());
-            c.push("hypervisor", device(vendor.clone(), "cpuid:leaf 0x1 ecx bit 31"));
+            c.push(
+                "hypervisor",
+                device(vendor.clone(), "cpuid:leaf 0x1 ecx bit 31"),
+            );
             hypervisor = Some(vendor);
         }
     }
@@ -74,17 +89,20 @@ pub fn probe() -> Cpu {
     // chips that report their topology across several leaves.
     let (physical, logical) = core_counts();
     if let Some(p) = physical {
-        c.push("cores", kernel(p, "sysfs:/sys/devices/system/cpu/*/topology/core_id"));
+        c.push(
+            "cores",
+            kernel(p, "sysfs:/sys/devices/system/cpu/*/topology/core_id"),
+        );
     }
     if let Some(l) = logical {
-        c.push("threads", kernel(l, "sysfs:/sys/devices/system/cpu/present"));
+        c.push(
+            "threads",
+            kernel(l, "sysfs:/sys/devices/system/cpu/present"),
+        );
     }
     if let (Some(p), Some(l)) = (physical, logical) {
-        if p > 0 {
-            c.push(
-                "threadsPerCore",
-                derived(l / p, "cores and threads above"),
-            );
+        if let Some(ratio) = l.checked_div(p) {
+            c.push("threadsPerCore", derived(ratio, "cores and threads above"));
         }
     }
 
@@ -171,9 +189,7 @@ fn core_counts() -> (Option<u64>, Option<u64>) {
 
 #[cfg(target_os = "linux")]
 fn max_frequency_khz() -> Option<u64> {
-    crate::platform::linux::read_u64(
-        "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
-    )
+    crate::platform::linux::read_u64("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
 }
 
 #[cfg(target_os = "windows")]

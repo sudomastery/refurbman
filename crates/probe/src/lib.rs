@@ -12,10 +12,13 @@
 pub mod battery;
 pub mod cpu;
 pub mod fact;
-pub mod report;
 pub mod platform;
+pub mod report;
+pub mod scan;
 pub mod smart;
 pub mod smbios;
+pub mod storage;
+pub mod tamper;
 
 pub use fact::{Fact, Trust, Value};
 pub use report::{Component, Consumable, Finding, Report, Verdict};

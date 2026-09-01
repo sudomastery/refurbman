@@ -59,9 +59,7 @@ impl Trust {
             Trust::Firmware => {
                 "Comes from the motherboard firmware. Changing it means reflashing the BIOS."
             }
-            Trust::Kernel => {
-                "Comes from the operating system kernel's own view of the hardware."
-            }
+            Trust::Kernel => "Comes from the operating system kernel's own view of the hardware.",
             Trust::Device => {
                 "The part itself reported this. Changing it means reflashing the part's firmware."
             }

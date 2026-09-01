@@ -117,8 +117,14 @@ pub fn drive(json: &Json, fallback_name: &str) -> Consumable {
         c.push("protocol", device(v, src("device.protocol")));
     }
     if let Some(bytes) = u64_at(json, &["user_capacity", "bytes"]) {
-        c.push("capacityBytes", device(bytes, src("user_capacity.bytes")).unit("bytes"));
-        c.push("capacity", derived(human_bytes(bytes), src("user_capacity.bytes")));
+        c.push(
+            "capacityBytes",
+            device(bytes, src("user_capacity.bytes")).unit("bytes"),
+        );
+        c.push(
+            "capacity",
+            derived(human_bytes(bytes), src("user_capacity.bytes")),
+        );
     }
 
     let rotation = u64_at(json, &["rotation_rate"]);
@@ -130,19 +136,31 @@ pub fn drive(json: &Json, fallback_name: &str) -> Consumable {
     }
     c.push(
         "kind",
-        derived(if is_ssd { "Solid state" } else { "Hard disk" }, src("rotation_rate")),
+        derived(
+            if is_ssd { "Solid state" } else { "Hard disk" },
+            src("rotation_rate"),
+        ),
     );
 
     let hours = u64_at(json, &["power_on_time", "hours"]);
     if let Some(h) = hours {
-        c.push("powerOnHours", device(h, src("power_on_time.hours")).unit("hours"));
-        c.push("powerOnYears", derived(round1(h as f64 / 8760.0), "power on hours").unit("years"));
+        c.push(
+            "powerOnHours",
+            device(h, src("power_on_time.hours")).unit("hours"),
+        );
+        c.push(
+            "powerOnYears",
+            derived(round1(h as f64 / 8760.0), "power on hours").unit("years"),
+        );
     }
     if let Some(v) = u64_at(json, &["power_cycle_count"]) {
         c.push("powerCycles", device(v, src("power_cycle_count")));
     }
     if let Some(v) = u64_at(json, &["temperature", "current"]) {
-        c.push("temperatureC", device(v, src("temperature.current")).unit("C"));
+        c.push(
+            "temperatureC",
+            device(v, src("temperature.current")).unit("C"),
+        );
     }
 
     let passed = json
@@ -176,10 +194,16 @@ fn nvme(json: &Json, c: &mut Consumable, src: &dyn Fn(&str) -> String) -> Option
         c.push("lifeUsedPercent", device(u, f("percentage_used")).unit("%"));
     }
     if let Some(v) = log.get("available_spare").and_then(Json::as_u64) {
-        c.push("spareAvailablePercent", device(v, f("available_spare")).unit("%"));
+        c.push(
+            "spareAvailablePercent",
+            device(v, f("available_spare")).unit("%"),
+        );
     }
     if let Some(v) = log.get("available_spare_threshold").and_then(Json::as_u64) {
-        c.push("spareThresholdPercent", device(v, f("available_spare_threshold")).unit("%"));
+        c.push(
+            "spareThresholdPercent",
+            device(v, f("available_spare_threshold")).unit("%"),
+        );
     }
     if let Some(v) = log.get("media_errors").and_then(Json::as_u64) {
         c.push("mediaErrors", device(v, f("media_errors")));
@@ -192,8 +216,14 @@ fn nvme(json: &Json, c: &mut Consumable, src: &dyn Fn(&str) -> String) -> Option
     }
     if let Some(v) = log.get("data_units_written").and_then(Json::as_u64) {
         let bytes = v.saturating_mul(NVME_DATA_UNIT_BYTES);
-        c.push("bytesWritten", device(bytes, f("data_units_written")).unit("bytes"));
-        c.push("totalWritten", derived(human_bytes(bytes), f("data_units_written")));
+        c.push(
+            "bytesWritten",
+            device(bytes, f("data_units_written")).unit("bytes"),
+        );
+        c.push(
+            "totalWritten",
+            derived(human_bytes(bytes), f("data_units_written")),
+        );
     }
     used.map(|u| u as f64)
 }
@@ -217,22 +247,38 @@ fn ata(json: &Json, c: &mut Consumable, src: &dyn Fn(&str) -> String) -> Option<
     if let Some(v) = ata_raw(json, 241) {
         // Logical sectors written, 512 bytes each.
         let bytes = v.saturating_mul(512);
-        c.push("bytesWritten", device(bytes, attr(241, "Total_LBAs_Written")).unit("bytes"));
-        c.push("totalWritten", derived(human_bytes(bytes), attr(241, "Total_LBAs_Written")));
+        c.push(
+            "bytesWritten",
+            device(bytes, attr(241, "Total_LBAs_Written")).unit("bytes"),
+        );
+        c.push(
+            "totalWritten",
+            derived(human_bytes(bytes), attr(241, "Total_LBAs_Written")),
+        );
     }
 
     // Newer smartctl computes this across protocols; prefer it when present.
     if let Some(v) = u64_at(json, &["endurance_used", "current_percent"]) {
-        c.push("lifeUsedPercent", device(v, src("endurance_used.current_percent")).unit("%"));
+        c.push(
+            "lifeUsedPercent",
+            device(v, src("endurance_used.current_percent")).unit("%"),
+        );
         return Some(v as f64);
     }
 
     // Otherwise fall back to whichever wear countdown this vendor implements.
-    for (id, name) in [(231u64, "SSD_Life_Left"), (177, "Wear_Leveling_Count"), (202, "Percent_Lifetime_Remain")] {
+    for (id, name) in [
+        (231u64, "SSD_Life_Left"),
+        (177, "Wear_Leveling_Count"),
+        (202, "Percent_Lifetime_Remain"),
+    ] {
         if let Some(remaining) = ata_normalised(json, id) {
             if remaining <= 100 {
                 let used = 100.0 - remaining as f64;
-                c.push("lifeUsedPercent", device(used as u64, attr(id, name)).unit("%"));
+                c.push(
+                    "lifeUsedPercent",
+                    device(used as u64, attr(id, name)).unit("%"),
+                );
                 return Some(used);
             }
         }
@@ -316,7 +362,9 @@ fn assess(
                      This drive has used nearly all of them, which means it is at the end \
                      of its working life.",
                 )
-                .evidence(format!("available_spare {spare}% at threshold {threshold}%")),
+                .evidence(format!(
+                    "available_spare {spare}% at threshold {threshold}%"
+                )),
             );
         }
     }
@@ -361,7 +409,11 @@ fn assess(
     // Spinning disk defects. A single reallocated sector is not a crisis, but
     // pending and uncorrectable sectors mean the drive is losing data now.
     if reallocated > 0 {
-        worst(if reallocated >= 50 { Verdict::Poor } else { Verdict::Fair });
+        worst(if reallocated >= 50 {
+            Verdict::Poor
+        } else {
+            Verdict::Fair
+        });
         c.findings.push(
             Finding::warn(
                 "The drive has replaced failed areas of its surface",
@@ -436,7 +488,9 @@ fn assess(
                          look newer than it is. Treat this drive, and this seller, with caution."
                     ),
                 )
-                .evidence(format!("power_on_time.hours = {h} against life used {used:.0}%")),
+                .evidence(format!(
+                    "power_on_time.hours = {h} against life used {used:.0}%"
+                )),
             );
         }
     }
@@ -445,10 +499,7 @@ fn assess(
         // A healthy spinning disk with no wear counter. Say so rather than
         // inventing a percentage.
         c.headline = match hours {
-            Some(h) if h > 0 => format!(
-                "No faults reported after {} of use.",
-                humanise_hours(h)
-            ),
+            Some(h) if h > 0 => format!("No faults reported after {} of use.", humanise_hours(h)),
             _ => "No faults reported.".into(),
         };
     }
@@ -501,7 +552,10 @@ pub fn locked(dev: &DeviceRef, reason: &str) -> Consumable {
     let mut c = Consumable::new("storage", dev.name.clone());
     c.verdict = Verdict::Unknown;
     c.headline = "Health could not be read without permission.".into();
-    c.push("device", crate::fact::kernel(dev.name.clone(), "smartctl:--scan-open"));
+    c.push(
+        "device",
+        crate::fact::kernel(dev.name.clone(), "smartctl:--scan-open"),
+    );
     c.findings.push(
         Finding::info(
             "This drive needs permission before it can be checked",
@@ -592,14 +646,20 @@ mod tests {
     fn heavily_worn_nvme_reads_poor() {
         let c = drive(&nvme_json(94, 40_000, 0), "fallback");
         assert_eq!(c.verdict, Verdict::Poor);
-        assert!(c.findings.iter().any(|f| f.title.contains("nearly worn out")));
+        assert!(c
+            .findings
+            .iter()
+            .any(|f| f.title.contains("nearly worn out")));
     }
 
     #[test]
     fn moderately_worn_nvme_reads_fair() {
         let c = drive(&nvme_json(75, 30_000, 0), "fallback");
         assert_eq!(c.verdict, Verdict::Fair);
-        assert!(c.findings.iter().any(|f| f.title.contains("significantly worn")));
+        assert!(c
+            .findings
+            .iter()
+            .any(|f| f.title.contains("significantly worn")));
     }
 
     #[test]
@@ -609,7 +669,10 @@ mod tests {
         j["smart_status"]["passed"] = json!(false);
         let c = drive(&j, "fallback");
         assert_eq!(c.verdict, Verdict::Poor);
-        assert!(c.findings.iter().any(|f| f.title.contains("reports that it is failing")));
+        assert!(c
+            .findings
+            .iter()
+            .any(|f| f.title.contains("reports that it is failing")));
     }
 
     #[test]
@@ -618,7 +681,10 @@ mod tests {
         j["nvme_smart_health_information_log"]["available_spare"] = json!(8);
         let c = drive(&j, "fallback");
         assert_eq!(c.verdict, Verdict::Poor);
-        assert!(c.findings.iter().any(|f| f.title.contains("run out of spare")));
+        assert!(c
+            .findings
+            .iter()
+            .any(|f| f.title.contains("run out of spare")));
     }
 
     #[test]
@@ -641,7 +707,10 @@ mod tests {
         // not be accused of anything.
         let c = drive(&nvme_json(0, 12, 0), "fallback");
         assert_eq!(c.verdict, Verdict::Good);
-        assert!(!c.findings.iter().any(|f| f.title.contains("does not add up")));
+        assert!(!c
+            .findings
+            .iter()
+            .any(|f| f.title.contains("does not add up")));
     }
 
     #[test]
@@ -651,21 +720,31 @@ mod tests {
         // A hard disk has no wear counter, so claiming a percentage would be
         // making one up.
         assert_eq!(c.percent, None);
-        assert!(c.headline.contains("2.4 years"), "headline was {:?}", c.headline);
+        assert!(
+            c.headline.contains("2.4 years"),
+            "headline was {:?}",
+            c.headline
+        );
     }
 
     #[test]
     fn pending_sectors_make_a_disk_poor() {
         let c = drive(&hdd_json(4, 8, 2, true), "fallback");
         assert_eq!(c.verdict, Verdict::Poor);
-        assert!(c.findings.iter().any(|f| f.title.contains("can no longer read")));
+        assert!(c
+            .findings
+            .iter()
+            .any(|f| f.title.contains("can no longer read")));
     }
 
     #[test]
     fn a_few_reallocated_sectors_are_fair_not_fatal() {
         let c = drive(&hdd_json(3, 0, 0, true), "fallback");
         assert_eq!(c.verdict, Verdict::Fair);
-        assert!(c.findings.iter().any(|f| f.title.contains("replaced failed areas")));
+        assert!(c
+            .findings
+            .iter()
+            .any(|f| f.title.contains("replaced failed areas")));
     }
 
     #[test]
@@ -678,7 +757,10 @@ mod tests {
     fn media_errors_are_surfaced() {
         let c = drive(&nvme_json(5, 3000, 7), "fallback");
         assert_eq!(c.verdict, Verdict::Fair);
-        assert!(c.findings.iter().any(|f| f.title.contains("unrecoverable errors")));
+        assert!(c
+            .findings
+            .iter()
+            .any(|f| f.title.contains("unrecoverable errors")));
     }
 
     #[test]
@@ -721,7 +803,11 @@ mod tests {
         j["ata_smart_attributes"]["table"][3]["raw"]["value"] = json!(14);
         let c = drive(&j, "fallback");
         assert_eq!(c.verdict, Verdict::Good);
-        let f = c.findings.iter().find(|f| f.title.contains("cable")).unwrap();
+        let f = c
+            .findings
+            .iter()
+            .find(|f| f.title.contains("cable"))
+            .unwrap();
         assert!(matches!(f.severity, crate::report::Severity::Info));
     }
 

@@ -68,7 +68,8 @@ pub fn assess(c: &mut Consumable) {
 
     // The plausibility check comes first, because when it fires the health
     // number should not be presented as a finding at all.
-    let unreliable = health >= IMPLAUSIBLY_PERFECT && cycles.is_some_and(|c| c > CYCLES_IMPLYING_WEAR);
+    let unreliable =
+        health >= IMPLAUSIBLY_PERFECT && cycles.is_some_and(|c| c > CYCLES_IMPLYING_WEAR);
 
     if unreliable {
         let cycles = cycles.unwrap_or(0);
@@ -103,9 +104,9 @@ pub fn assess(c: &mut Consumable) {
 
     c.headline = match c.verdict {
         Verdict::Good => format!("Holds {health:.0}% of its original charge. In good shape."),
-        Verdict::Fair => format!(
-            "Holds {health:.0}% of its original charge. Noticeably worn but usable."
-        ),
+        Verdict::Fair => {
+            format!("Holds {health:.0}% of its original charge. Noticeably worn but usable.")
+        }
         Verdict::Poor => format!(
             "Holds only {health:.0}% of its original charge. Expect a short time unplugged."
         ),
@@ -195,7 +196,10 @@ fn linux_batteries() -> Vec<Consumable> {
             c.push("model", device(v, format!("sysfs:{dir}/model_name")));
         }
         if let Some(v) = read_trimmed(format!("{dir}/manufacturer")) {
-            c.push("manufacturer", device(v, format!("sysfs:{dir}/manufacturer")));
+            c.push(
+                "manufacturer",
+                device(v, format!("sysfs:{dir}/manufacturer")),
+            );
         }
         if let Some(v) = read_trimmed(format!("{dir}/technology")) {
             c.push("technology", device(v, format!("sysfs:{dir}/technology")));
@@ -204,7 +208,10 @@ fn linux_batteries() -> Vec<Consumable> {
             c.push("cycleCount", device(v, format!("sysfs:{dir}/cycle_count")));
         }
         if let Some(v) = read_u64(format!("{dir}/capacity")) {
-            c.push("chargeNowPercent", kernel(v, format!("sysfs:{dir}/capacity")).unit("%"));
+            c.push(
+                "chargeNowPercent",
+                kernel(v, format!("sysfs:{dir}/capacity")).unit("%"),
+            );
         }
         if let Some(v) = read_trimmed(format!("{dir}/status")) {
             c.push("status", kernel(v, format!("sysfs:{dir}/status")));
@@ -236,8 +243,11 @@ fn linux_batteries() -> Vec<Consumable> {
                         let wh = |uah: u64| (uah as f64 * mv as f64) / 1e12;
                         c.push(
                             "designCapacityWh",
-                            device(round1(wh(design)), format!("sysfs:{dir}/charge_full_design"))
-                                .unit("Wh"),
+                            device(
+                                round1(wh(design)),
+                                format!("sysfs:{dir}/charge_full_design"),
+                            )
+                            .unit("Wh"),
                         );
                         c.push(
                             "currentCapacityWh",
@@ -247,20 +257,30 @@ fn linux_batteries() -> Vec<Consumable> {
                 } else {
                     c.push(
                         "designCapacityWh",
-                        device(round1(design as f64 / 1e6), format!("sysfs:{dir}/energy_full_design"))
-                            .unit("Wh"),
+                        device(
+                            round1(design as f64 / 1e6),
+                            format!("sysfs:{dir}/energy_full_design"),
+                        )
+                        .unit("Wh"),
                     );
                     c.push(
                         "currentCapacityWh",
-                        device(round1(full as f64 / 1e6), format!("sysfs:{dir}/energy_full")).unit("Wh"),
+                        device(
+                            round1(full as f64 / 1e6),
+                            format!("sysfs:{dir}/energy_full"),
+                        )
+                        .unit("Wh"),
                     );
                 }
 
                 let health = (full as f64 / design as f64) * 100.0;
                 c.push(
                     "healthPercent",
-                    derived(round1(health), format!("sysfs:{dir}/{unit_src}_full divided by design"))
-                        .unit("%"),
+                    derived(
+                        round1(health),
+                        format!("sysfs:{dir}/{unit_src}_full divided by design"),
+                    )
+                    .unit("%"),
                 );
             }
         }
@@ -297,18 +317,37 @@ fn portable_batteries() -> Vec<Consumable> {
             c.push("model", device(v.to_owned(), format!("{SRC}.DeviceName")));
         }
         if let Some(v) = b.vendor() {
-            c.push("manufacturer", device(v.to_owned(), format!("{SRC}.ManufactureName")));
+            c.push(
+                "manufacturer",
+                device(v.to_owned(), format!("{SRC}.ManufactureName")),
+            );
         }
-        c.push("technology", device(b.technology().to_string(), format!("{SRC}.Chemistry")));
+        c.push(
+            "technology",
+            device(b.technology().to_string(), format!("{SRC}.Chemistry")),
+        );
 
         if let Some(v) = b.cycle_count() {
-            c.push("cycleCount", device(u64::from(v), format!("{SRC}.CycleCount")));
+            c.push(
+                "cycleCount",
+                device(u64::from(v), format!("{SRC}.CycleCount")),
+            );
         }
 
         let design = b.energy_full_design().value; // watt-hours
         let full = b.energy_full().value;
-        c.push("designCapacityWh", device(round1(f64::from(design)), format!("{SRC}.DesignedCapacity")).unit("Wh"));
-        c.push("currentCapacityWh", device(round1(f64::from(full)), format!("{SRC}.FullChargedCapacity")).unit("Wh"));
+        c.push(
+            "designCapacityWh",
+            device(round1(f64::from(design)), format!("{SRC}.DesignedCapacity")).unit("Wh"),
+        );
+        c.push(
+            "currentCapacityWh",
+            device(
+                round1(f64::from(full)),
+                format!("{SRC}.FullChargedCapacity"),
+            )
+            .unit("Wh"),
+        );
         if design > 0.0 {
             c.push(
                 "healthPercent",
@@ -359,7 +398,10 @@ mod tests {
     fn worn_pack_reads_fair_and_warns() {
         let c = with(Some(71.0), Some(400));
         assert_eq!(c.verdict, Verdict::Fair);
-        assert!(c.findings.iter().any(|f| f.title.contains("lost some capacity")));
+        assert!(c
+            .findings
+            .iter()
+            .any(|f| f.title.contains("lost some capacity")));
     }
 
     #[test]
@@ -376,10 +418,7 @@ mod tests {
         // refuse to report Good here.
         let c = with(Some(100.0), Some(766));
         assert_eq!(c.verdict, Verdict::Unknown);
-        assert!(c
-            .findings
-            .iter()
-            .any(|f| f.title.contains("unreliable")));
+        assert!(c.findings.iter().any(|f| f.title.contains("unreliable")));
         assert!(c.headline.contains("766"));
     }
 
@@ -400,6 +439,9 @@ mod tests {
     fn high_cycle_count_is_flagged_even_when_health_is_fine() {
         let c = with(Some(85.0), Some(1100));
         assert_eq!(c.verdict, Verdict::Good);
-        assert!(c.findings.iter().any(|f| f.title.contains("great many times")));
+        assert!(c
+            .findings
+            .iter()
+            .any(|f| f.title.contains("great many times")));
     }
 }

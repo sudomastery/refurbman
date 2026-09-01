@@ -49,7 +49,11 @@ impl Smartctl {
             }
         }
         // Fall back to whatever is on PATH.
-        let name = if cfg!(windows) { "smartctl.exe" } else { "smartctl" };
+        let name = if cfg!(windows) {
+            "smartctl.exe"
+        } else {
+            "smartctl"
+        };
         let out = Command::new(name).arg("--version").output().ok()?;
         out.status.success().then(|| Smartctl {
             binary: PathBuf::from(name),
@@ -59,7 +63,11 @@ impl Smartctl {
     fn candidates() -> Vec<PathBuf> {
         let exe = std::env::current_exe().ok();
         let dir = exe.as_ref().and_then(|p| p.parent()).map(PathBuf::from);
-        let name = if cfg!(windows) { "smartctl.exe" } else { "smartctl" };
+        let name = if cfg!(windows) {
+            "smartctl.exe"
+        } else {
+            "smartctl"
+        };
 
         let mut v = Vec::new();
         if let Some(dir) = dir {

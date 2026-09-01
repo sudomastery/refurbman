@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  probe:
+    name: Probe engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      # Windows correctness cannot be checked on the development machine, so the
+      # engine is run for real here and asked to produce a report.
+      - name: Run the probe
+        run: cargo run -p refurbman-probe --bin refurbman-probe -- --json
+
+  shell:
+    name: Shell script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax
+        run: bash -n scripts/refurbman.sh
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          shellcheck -S warning scripts/refurbman.sh
+      - name: Run unprivileged
+        run: ./scripts/refurbman.sh --no-color
+      - name: Run privileged
+        run: sudo ./scripts/refurbman.sh --no-color
+      - name: JSON output must parse
+        run: ./scripts/refurbman.sh --json | python3 -m json.tool > /dev/null
+
+  powershell:
+    name: PowerShell script
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax
+        shell: pwsh
+        run: |
+          $errs = $null; $tokens = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/scripts/RefurbMan.ps1", [ref]$tokens, [ref]$errs)
+          if ($errs) { $errs | ForEach-Object { Write-Host $_ }; exit 1 }
+          Write-Host 'Syntax OK'
+      - name: Tests
+        shell: pwsh
+        run: ./tests/RefurbMan.Tests.ps1
+      # The runner is a real Windows machine, so the script is exercised against
+      # actual firmware tables rather than only against synthetic ones.
+      - name: Run for real
+        shell: pwsh
+        run: ./scripts/RefurbMan.ps1 -NoColor
+      - name: JSON output must parse
+        shell: pwsh
+        run: ./scripts/RefurbMan.ps1 -Json | ConvertFrom-Json | Out-Null
+
+  secrets:
+    name: No hardware serials in fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Test fixtures are the natural place for a real drive or board serial to
+      # leak into a public repository, so the build fails rather than let one
+      # through. Fixtures must be fabricated, and fabricated ones say EXAMPLE.
+      - name: Scan fixtures
+        run: |
+          if grep -rInE '"serial_number"[[:space:]]*:[[:space:]]*"(?!EXAMPLE)' \
+               --include='*.json' --include='*.rs' crates/ tests/ 2>/dev/null \
+             | grep -v 'EXAMPLE' | grep -v 'fabricated'; then
+            echo "::error::A fixture appears to contain a real serial number."
+            exit 1
+          fi
+          echo "No real serials found."
