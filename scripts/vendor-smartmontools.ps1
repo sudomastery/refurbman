@@ -62,20 +62,37 @@ function Get-Verified {
         Remove-Item $Dest -Force
     }
 
-    Write-Host "  downloading $(Split-Path -Leaf $Dest)"
-    try {
-        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
-    } catch {
-        if (Test-Path $Dest) { Remove-Item $Dest -Force }
-        throw "could not download $Url : $($_.Exception.Message)"
+    # Mirrors occasionally answer with an error page instead of the file, so a
+    # mismatch is retried before it is treated as a problem with the release.
+    $got = 'nothing'
+    foreach ($attempt in 1..3) {
+        Write-Host "  downloading $(Split-Path -Leaf $Dest) (attempt $attempt)"
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -MaximumRedirection 10
+        } catch {
+            Write-Host "  download failed: $($_.Exception.Message)"
+            if (Test-Path $Dest) { Remove-Item $Dest -Force }
+            continue
+        }
+
+        $got = (Get-FileHash $Dest -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($got -eq $Expected) {
+            Write-Host "  verified $(Split-Path -Leaf $Dest)"
+            return
+        }
+
+        $head = [System.IO.File]::ReadAllBytes($Dest)[0..([Math]::Min(511, (Get-Item $Dest).Length - 1))]
+        if ([System.Text.Encoding]::ASCII.GetString($head) -match '(?i)<html') {
+            Write-Host '  a mirror returned a web page instead of the file; trying again'
+        } else {
+            Write-Host '  checksum did not match; trying again'
+        }
+        Remove-Item $Dest -Force
     }
 
-    $got = (Get-FileHash $Dest -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($got -ne $Expected) {
-        Remove-Item $Dest -Force
-        throw "checksum mismatch for $(Split-Path -Leaf $Dest)`n  expected $Expected`n  got      $got"
-    }
-    Write-Host "  verified $(Split-Path -Leaf $Dest)"
+    # Refuse rather than continue. An unverified smartctl would produce health
+    # figures this project could not stand behind.
+    throw "could not obtain a verified $(Split-Path -Leaf $Dest) after three attempts`n  expected $Expected`n  last got $got"
 }
 
 Write-Host ''
@@ -84,7 +101,7 @@ Write-Host ''
 
 # --- source, always ----------------------------------------------------------
 $srcTgz = Join-Path $src "smartmontools-$version.tar.gz"
-Get-Verified "$base/smartmontools-$version.tar.gz/download" $srcTgz $pin['SMARTMONTOOLS_SOURCE_SHA256']
+Get-Verified "$base/smartmontools-$version.tar.gz" $srcTgz $pin['SMARTMONTOOLS_SOURCE_SHA256']
 
 if ($SourceOnly) {
     Write-Host ''
@@ -94,7 +111,7 @@ if ($SourceOnly) {
 
 # --- Windows binary ----------------------------------------------------------
 $winExe = Join-Path $src "smartmontools-$version.win32-setup.exe"
-Get-Verified "$base/smartmontools-$version.win32-setup.exe/download" $winExe $pin['SMARTMONTOOLS_WIN32_SHA256']
+Get-Verified "$base/smartmontools-$version.win32-setup.exe" $winExe $pin['SMARTMONTOOLS_WIN32_SHA256']
 
 Write-Host '  unpacking the Windows build'
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())

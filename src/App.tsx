@@ -75,9 +75,10 @@ export default function App() {
         filters: [{ name: "Report", extensions: ["html"] }],
       });
       if (!path) return;
-      // Render from the report already on screen rather than rescanning, so the
-      // saved document cannot differ from what the user is looking at.
-      const html = await invoke<string>("render_html", { report });
+      // The engine renders from the scan it still holds, so the saved document
+      // cannot differ from what the user is looking at, and no large report has
+      // to travel back across the bridge.
+      const html = await invoke<string>("render_html");
       const written = await invoke<string>("save_html", { path, html });
       setSaved(written);
     } catch (e) {
@@ -107,8 +108,9 @@ export default function App() {
         saved={saved}
       />
 
-      <nav className="flex flex-none gap-1 border-b px-6 hairline" aria-label="Sections">
-        {VIEWS.map(([id, label]) => (
+      <div className="flex-none border-b hairline">
+        <nav className="mx-auto flex max-w-4xl gap-1 px-6" aria-label="Sections">
+          {VIEWS.map(([id, label]) => (
           <button
             key={id}
             onClick={() => setView(id)}
@@ -124,8 +126,9 @@ export default function App() {
               <span className="ml-1.5 text-xs ink-3">{report.findings.length}</span>
             )}
           </button>
-        ))}
-      </nav>
+          ))}
+        </nav>
+      </div>
 
       <main className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-4xl">
@@ -231,7 +234,7 @@ function Header({
 
   return (
     <header className="flex-none border-b px-6 pb-4 pt-5 hairline">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="mx-auto flex max-w-4xl flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] ink-3">RefurbMan</p>
           <h1 className="selectable mt-1 truncate text-2xl font-semibold">
@@ -259,7 +262,7 @@ function Header({
         </div>
       </div>
       {saved && (
-        <p className="mt-2 text-sm ink-2">
+        <p className="mx-auto mt-2 max-w-4xl text-sm ink-2">
           Saved to <span className="selectable font-mono text-xs">{saved}</span>. Open it and
           choose Print, then Save as PDF, for a PDF copy.
         </p>

@@ -20,8 +20,11 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      # Scoped to the probe crate on purpose: the desktop app is in this
+      # workspace too, and it needs GUI libraries this job has no reason to
+      # install. The app has its own job below.
+      - run: cargo clippy -p refurbman-probe --all-targets -- -D warnings
+      - run: cargo test -p refurbman-probe
       # Windows correctness cannot be checked on the development machine, so the
       # engine is run for real here and asked to produce a report.
       - name: Run the probe

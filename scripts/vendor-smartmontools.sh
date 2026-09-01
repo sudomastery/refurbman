@@ -56,30 +56,40 @@ fetch() {
     rm -f "$dest"
   fi
 
-  say "downloading $(basename "$dest")"
-  if ! curl -fsSL --retry 3 -o "$dest" "$url"; then
-    printf 'error: could not download %s\n' "$url" >&2
+  # Mirrors occasionally answer with an error page instead of the file, so a
+  # mismatch is retried before it is treated as a problem with the release.
+  local attempt
+  for attempt in 1 2 3; do
+    say "downloading $(basename "$dest") (attempt $attempt)"
+    if ! curl -fsSL --retry 2 -o "$dest" "$url"; then
+      rm -f "$dest"
+      continue
+    fi
+    got="$(sha256sum "$dest" | cut -d' ' -f1)"
+    if [ "$got" = "$want" ]; then
+      say "verified $(basename "$dest")"
+      return 0
+    fi
+    if head -c 512 "$dest" | grep -qi '<html'; then
+      say "a mirror returned a web page instead of the file; trying again"
+    else
+      say "checksum did not match; trying again"
+    fi
     rm -f "$dest"
-    exit 1
-  fi
+  done
 
-  got="$(sha256sum "$dest" | cut -d' ' -f1)"
-  if [ "$got" != "$want" ]; then
-    # Refuse rather than continue. An unverified smartctl would produce health
-    # figures this project could not stand behind.
-    printf 'error: checksum mismatch for %s\n  expected %s\n  got      %s\n' \
-      "$(basename "$dest")" "$want" "$got" >&2
-    rm -f "$dest"
-    exit 1
-  fi
-  say "verified $(basename "$dest")"
+  # Refuse rather than continue. An unverified smartctl would produce health
+  # figures this project could not stand behind.
+  printf 'error: could not obtain a verified %s after three attempts\n  expected %s\n  last got %s\n' \
+    "$(basename "$dest")" "$want" "${got:-nothing}" >&2
+  exit 1
 }
 
 printf '\nsmartmontools %s\n\n' "$V"
 
 # --- source, always: this is what the GPL written offer points at ------------
 SRC_TGZ="$OUT/smartmontools-$V.tar.gz"
-fetch "$BASE/smartmontools-$V.tar.gz/download" "$SRC_TGZ" "$SMARTMONTOOLS_SOURCE_SHA256"
+fetch "$BASE/smartmontools-$V.tar.gz" "$SRC_TGZ" "$SMARTMONTOOLS_SOURCE_SHA256"
 
 if [ "$WANT_SOURCE_ONLY" = 1 ]; then
   printf '\nSource is at %s\n\n' "$SRC_TGZ"
@@ -94,7 +104,7 @@ if [ "$WANT_WINDOWS" = 1 ]; then
     exit 1
   fi
   WIN_EXE="$OUT/smartmontools-$V.win32-setup.exe"
-  fetch "$BASE/smartmontools-$V.win32-setup.exe/download" "$WIN_EXE" "$SMARTMONTOOLS_WIN32_SHA256"
+  fetch "$BASE/smartmontools-$V.win32-setup.exe" "$WIN_EXE" "$SMARTMONTOOLS_WIN32_SHA256"
 
   say "unpacking the Windows build"
   TMP="$(mktemp -d)"

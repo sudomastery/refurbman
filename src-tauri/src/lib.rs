@@ -6,9 +6,16 @@
 //! report.
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
-use refurbman_probe::{platform, report_html, scan};
+use refurbman_probe::{platform, report_html, scan, Report};
 use serde::Serialize;
+
+/// The most recent scan, kept so a report can be rendered from exactly the
+/// value the window is showing rather than from a copy sent back over the
+/// bridge.
+#[derive(Default)]
+struct LastScan(Mutex<Option<Report>>);
 
 /// What the interface needs to know before it has run anything.
 #[derive(Serialize)]
@@ -42,19 +49,14 @@ fn readiness() -> Readiness {
 /// it runs on Tauri's blocking pool rather than the async runtime; holding the
 /// latter up would freeze the window.
 #[tauri::command(async)]
-fn run_scan() -> Result<serde_json::Value, String> {
+fn run_scan(state: tauri::State<'_, LastScan>) -> Result<serde_json::Value, String> {
     let report = scan::run();
-    serde_json::to_value(&report).map_err(|e| format!("Could not prepare the report: {e}"))
-}
-
-/// Write the HTML report to a path the user chose.
-#[tauri::command(async)]
-fn export_html(path: String) -> Result<String, String> {
-    let report = scan::run();
-    let html = report_html::render(&report);
-    let path = PathBuf::from(path);
-    std::fs::write(&path, html).map_err(|e| format!("Could not write {}: {e}", path.display()))?;
-    Ok(path.display().to_string())
+    let json = serde_json::to_value(&report)
+        .map_err(|e| format!("Could not prepare the report: {e}"))?;
+    if let Ok(mut last) = state.0.lock() {
+        *last = Some(report);
+    }
+    Ok(json)
 }
 
 /// Save an already-rendered report, so exporting does not rescan the machine.
@@ -68,12 +70,17 @@ fn save_html(path: String, html: String) -> Result<String, String> {
     Ok(path.display().to_string())
 }
 
-/// Render a report the interface already holds, without touching the disk.
+/// Render the most recent scan as HTML, without touching the disk.
 #[tauri::command(async)]
-fn render_html(report: serde_json::Value) -> Result<String, String> {
-    let report: refurbman_probe::Report =
-        serde_json::from_value(report).map_err(|e| format!("Could not read the report: {e}"))?;
-    Ok(report_html::render(&report))
+fn render_html(state: tauri::State<'_, LastScan>) -> Result<String, String> {
+    let last = state
+        .0
+        .lock()
+        .map_err(|_| "The last scan could not be read.".to_owned())?;
+    let report = last
+        .as_ref()
+        .ok_or_else(|| "Nothing has been checked yet.".to_owned())?;
+    Ok(report_html::render(report))
 }
 
 /// Whether an elevation path exists on this machine.
@@ -180,12 +187,12 @@ fn relaunch_elevated() -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(LastScan::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             readiness,
             run_scan,
-            export_html,
             save_html,
             render_html,
             relaunch_elevated
