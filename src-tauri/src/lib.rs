@@ -17,6 +17,18 @@ use serde::Serialize;
 #[derive(Default)]
 struct LastScan(Mutex<Option<Report>>);
 
+impl LastScan {
+    /// Take the lock, recovering it if a previous holder panicked.
+    ///
+    /// There is no invariant here to protect, only the most recent report, so
+    /// a poisoned lock is worth recovering rather than propagating. Refusing
+    /// would disable saving for the life of the process, and the user would
+    /// see scans succeed while Save report failed forever.
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Report>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 /// What the interface needs to know before it has run anything.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,14 +85,13 @@ fn save_html(path: String, html: String) -> Result<String, String> {
 /// Render the most recent scan as HTML, without touching the disk.
 #[tauri::command(async)]
 fn render_html(state: tauri::State<'_, LastScan>) -> Result<String, String> {
-    let last = state
-        .0
+    // Cloned so the lock is released before rendering. Holding it across the
+    // render would mean a panic in there poisons the report for good.
+    let report = state
         .lock()
-        .map_err(|_| "The last scan could not be read.".to_owned())?;
-    let report = last
-        .as_ref()
+        .clone()
         .ok_or_else(|| "Nothing has been checked yet.".to_owned())?;
-    Ok(report_html::render(report))
+    Ok(report_html::render(&report))
 }
 
 /// Whether an elevation path exists on this machine.

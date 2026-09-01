@@ -108,8 +108,11 @@ export default function App() {
         saved={saved}
       />
 
-      <div className="flex-none border-b hairline">
-        <nav className="mx-auto flex max-w-4xl gap-1 px-6" aria-label="Sections">
+      {/* The padding sits outside the max-width box, matching the header and
+          the content below. Inside it, the strip would shift right by the
+          padding and be narrower than everything it lines up against. */}
+      <div className="flex-none border-b px-6 hairline">
+        <nav className="mx-auto flex max-w-4xl gap-1" aria-label="Sections">
           {VIEWS.map(([id, label]) => (
           <button
             key={id}
@@ -130,7 +133,14 @@ export default function App() {
         </nav>
       </div>
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+      {/* The scrollbar gutter is reserved on both sides so the centred content
+          does not shift by half a scrollbar relative to the header and tabs,
+          which have no scrollbar of their own. Ignored by engines that do not
+          support it, which leaves the previous behaviour. */}
+      <main
+        className="min-h-0 flex-1 overflow-y-auto px-6 py-6"
+        style={{ scrollbarGutter: "stable both-edges" }}
+      >
         <div className="mx-auto max-w-4xl">
           {error && <Banner tone="critical" text={error} />}
           {!report.privileged && <UnlockNotice ready={ready} onElevate={elevate} />}

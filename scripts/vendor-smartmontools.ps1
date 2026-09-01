@@ -87,8 +87,25 @@ function Get-Verified {
             return
         }
 
-        $head = [System.IO.File]::ReadAllBytes($Dest)[0..([Math]::Min(511, (Get-Item $Dest).Length - 1))]
-        if ([System.Text.Encoding]::ASCII.GetString($head) -match '(?i)<html') {
+        # Sniff the first bytes to tell a mirror's error page apart from a
+        # genuinely different file. Read only what is needed: the installer is
+        # 1.5 MB and none of it past the first line matters here.
+        $sniff = ''
+        $length = (Get-Item $Dest).Length
+        if ($length -gt 0) {
+            $stream = [System.IO.File]::OpenRead($Dest)
+            try {
+                $buffer = New-Object byte[] ([Math]::Min(512, $length))
+                $read = $stream.Read($buffer, 0, $buffer.Length)
+                $sniff = [System.Text.Encoding]::ASCII.GetString($buffer, 0, $read)
+            } finally {
+                $stream.Dispose()
+            }
+        }
+
+        if ($length -eq 0) {
+            Write-Host '  a mirror returned an empty file; trying again'
+        } elseif ($sniff -match '(?i)<html') {
             Write-Host '  a mirror returned a web page instead of the file; trying again'
         } else {
             Write-Host '  checksum did not match; trying again'

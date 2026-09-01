@@ -64,6 +64,10 @@ fetch() {
   # mismatch is retried before it is treated as a problem with the release.
   local attempt
   for attempt in 1 2 3; do
+    # Cleared each time round: the failure message quotes this, and a reader
+    # treats it as tampering evidence, so it must not carry a hash from an
+    # earlier attempt.
+    got=""
     say "downloading $(basename "$dest") (attempt $attempt)"
     if ! curl -fsSL --retry 2 -A "$UA" -o "$dest" "$url"; then
       rm -f "$dest"
@@ -85,7 +89,7 @@ fetch() {
   # Refuse rather than continue. An unverified smartctl would produce health
   # figures this project could not stand behind.
   printf 'error: could not obtain a verified %s after three attempts\n  expected %s\n  last got %s\n' \
-    "$(basename "$dest")" "$want" "${got:-nothing}" >&2
+    "$(basename "$dest")" "$want" "${got:-nothing, the download itself failed}" >&2
   exit 1
 }
 
