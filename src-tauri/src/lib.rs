@@ -51,8 +51,8 @@ fn readiness() -> Readiness {
 #[tauri::command(async)]
 fn run_scan(state: tauri::State<'_, LastScan>) -> Result<serde_json::Value, String> {
     let report = scan::run();
-    let json = serde_json::to_value(&report)
-        .map_err(|e| format!("Could not prepare the report: {e}"))?;
+    let json =
+        serde_json::to_value(&report).map_err(|e| format!("Could not prepare the report: {e}"))?;
     if let Ok(mut last) = state.0.lock() {
         *last = Some(report);
     }

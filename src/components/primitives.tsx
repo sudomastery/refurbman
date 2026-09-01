@@ -161,7 +161,7 @@ const CHECK: Record<CheckStatus, { mark: string; word: string; ink: string }> = 
   pass: { mark: "✓", word: "Passed", ink: "var(--good-ink)" },
   suspicious: { mark: "!", word: "Worth a look", ink: "var(--fair-ink)" },
   fail: { mark: "✗", word: "Failed", ink: "var(--poor-ink)" },
-  skipped: { mark: "–", word: "Not checked", ink: "var(--ink-3)" },
+  skipped: { mark: "-", word: "Not checked", ink: "var(--ink-3)" },
 };
 
 export function CheckRow({ status, title, detail }: { status: CheckStatus; title: string; detail: string }) {

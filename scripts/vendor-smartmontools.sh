@@ -43,6 +43,10 @@ mkdir -p "$OUT" "$BIN"
 
 say() { printf '  %s\n' "$*"; }
 
+# SourceForge answers browser-like agents with an interstitial page rather than
+# the file. Identifying ourselves honestly gets the file and says who is asking.
+UA='RefurbMan/0.1 (+https://github.com/sudomastery/refurbman)'
+
 # fetch <url> <destination> <expected sha256>
 fetch() {
   local url="$1" dest="$2" want="$3" got
@@ -61,7 +65,7 @@ fetch() {
   local attempt
   for attempt in 1 2 3; do
     say "downloading $(basename "$dest") (attempt $attempt)"
-    if ! curl -fsSL --retry 2 -o "$dest" "$url"; then
+    if ! curl -fsSL --retry 2 -A "$UA" -o "$dest" "$url"; then
       rm -f "$dest"
       continue
     fi

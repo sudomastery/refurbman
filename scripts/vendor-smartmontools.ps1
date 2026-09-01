@@ -49,6 +49,11 @@ $src     = Join-Path $vendor 'src'
 $bin     = Join-Path $vendor 'bin/windows-x86_64'
 New-Item -ItemType Directory -Force -Path $src, $bin | Out-Null
 
+# SourceForge answers browser-like agents with an interstitial page rather than
+# the file, and Invoke-WebRequest's default agent begins with "Mozilla/5.0".
+# Identifying ourselves honestly gets the file and says who is asking.
+$script:UserAgent = 'RefurbMan/0.1 (+https://github.com/sudomastery/refurbman)'
+
 function Get-Verified {
     param([string]$Url, [string]$Dest, [string]$Expected)
 
@@ -68,7 +73,8 @@ function Get-Verified {
     foreach ($attempt in 1..3) {
         Write-Host "  downloading $(Split-Path -Leaf $Dest) (attempt $attempt)"
         try {
-            Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -MaximumRedirection 10
+            Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing `
+                -MaximumRedirection 10 -UserAgent $script:UserAgent
         } catch {
             Write-Host "  download failed: $($_.Exception.Message)"
             if (Test-Path $Dest) { Remove-Item $Dest -Force }

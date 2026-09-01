@@ -219,7 +219,7 @@ fn checks(h: &mut String, r: &Report) {
             CheckStatus::Pass => ("pass", "&#10003;", "Passed"),
             CheckStatus::Suspicious => ("look", "&#33;", "Worth a look"),
             CheckStatus::Fail => ("fail", "&#10007;", "Failed"),
-            CheckStatus::Skipped => ("skip", "&#8211;", "Not checked"),
+            CheckStatus::Skipped => ("skip", "-", "Not checked"),
         };
         h.push_str(&format!(
             "<li class=\"check {cls}\"><span class=\"mark\" aria-hidden=\"true\">{mark}</span>\
