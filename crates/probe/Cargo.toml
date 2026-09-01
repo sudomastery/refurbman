@@ -1,0 +1,40 @@
+[package]
+name = "refurbman-probe"
+description = "Hardware and wear probing engine that reads from the kernel, firmware and device, never the registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "refurbman_probe"
+path = "src/lib.rs"
+
+[[bin]]
+name = "refurbman-probe"
+path = "src/bin/refurbman-probe.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+smbios-lib = "0.9"
+raw-cpuid = "11"
+sysinfo = "0.39"
+starship-battery = "0.11"
+pci-ids = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_SystemInformation",
+    "Win32_System_IO",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Ioctl",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }

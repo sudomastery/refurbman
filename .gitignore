@@ -1,0 +1,13 @@
+/target
+/node_modules
+/dist
+/src-tauri/target
+*.log
+
+# Vendored third-party binaries are fetched by scripts/vendor-smartmontools.*
+/third_party/smartmontools/bin/
+/third_party/smartmontools/src/
+
+# Never commit raw probe output: it contains hardware serials.
+/*.report.json
+/scratch/
