@@ -11,7 +11,7 @@
 //! through hundreds of cycles and still claims to be factory-new is not being
 //! measured, it is being assumed.
 
-use crate::fact::{derived, device, kernel, Value};
+use crate::fact::{derived, device, Value};
 use crate::report::{Consumable, Finding, Verdict};
 
 /// Cycles past which a consumer lithium pack is normally considered spent.
@@ -163,6 +163,7 @@ pub fn assess(c: &mut Consumable) {
 
 #[cfg(target_os = "linux")]
 fn linux_batteries() -> Vec<Consumable> {
+    use crate::fact::kernel;
     use crate::platform::linux::{read_trimmed, read_u64};
 
     const BASE: &str = "/sys/class/power_supply";
