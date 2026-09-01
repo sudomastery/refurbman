@@ -14,6 +14,7 @@ pub mod cpu;
 pub mod fact;
 pub mod report;
 pub mod platform;
+pub mod smart;
 pub mod smbios;
 
 pub use fact::{Fact, Trust, Value};
