@@ -123,8 +123,9 @@ brand string the processor itself returns to the `CPUID` instruction.
 
 ## Status
 
-Early development. The two scripts above work today. The probe engine behind
-the desktop application is built and tested; the desktop interface follows.
+Early development, but usable. The two scripts work today, the probe engine is
+built and tested, and the desktop application runs. Installers are produced by
+the release workflow on a version tag.
 
 ## Licence
 

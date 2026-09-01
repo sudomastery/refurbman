@@ -1,0 +1,66 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "RefurbMan",
+  "version": "0.1.0",
+  "identifier": "org.refurbman.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "RefurbMan",
+        "width": 1120,
+        "height": 840,
+        "minWidth": 720,
+        "minHeight": 560,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "rpm",
+      "appimage",
+      "nsis",
+      "msi"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "licenseFile": "../LICENSE",
+    "shortDescription": "Check what is really inside a second-hand PC",
+    "longDescription": "RefurbMan reports a computer's hardware and how worn its parts are, reading from the operating system kernel, the motherboard firmware tables and the devices themselves rather than from anything a seller can easily edit.",
+    "category": "Utility",
+    "publisher": "RefurbMan",
+    "linux": {
+      "deb": {
+        "depends": [
+          "smartmontools"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "smartmontools"
+        ]
+      }
+    },
+    "resources": {
+      "../third_party/smartmontools/COPYING": "smartmontools-COPYING",
+      "../third_party/smartmontools/SOURCE-OFFER.md": "smartmontools-SOURCE-OFFER.md"
+    }
+  }
+}

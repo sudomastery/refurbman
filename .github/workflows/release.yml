@@ -1,0 +1,115 @@
+name: Release
+
+# Builds the installers and publishes them, on a version tag.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# The smartmontools source tarball is attached to every release. That is not
+# housekeeping: GPL-2.0 section 3 requires source to accompany the binary, and
+# the Windows installer carries a smartctl binary. See
+# third_party/smartmontools/SOURCE-OFFER.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            label: Linux (deb, rpm, AppImage)
+            args: ""
+          - os: windows-latest
+            label: Windows (MSI, NSIS)
+            args: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Built on 22.04 rather than the newest runner: an AppImage links against
+      # the glibc it was built with, so building on an older base is what lets
+      # it run on older systems rather than only on the newest.
+      - name: Linux build dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            librsvg2-dev libayatana-appindicator3-dev libdbus-1-dev \
+            libxdo-dev libssl-dev build-essential pkg-config
+
+      # Always fetched, on both platforms: the source tarball is what satisfies
+      # the GPL written offer, and Windows additionally needs the binary.
+      - name: Vendor smartmontools (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: ./scripts/vendor-smartmontools.sh --source
+
+      - name: Vendor smartmontools (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/vendor-smartmontools.ps1
+
+      - run: npm ci
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: RefurbMan ${{ github.ref_name }}
+          releaseBody: |
+            Check what is really inside a second-hand PC, and how much life its
+            parts have left.
+
+            **Windows**: download the `.msi` or the `-setup.exe`. Right click and
+            choose Run as administrator for the full check, which includes drive
+            wear.
+
+            **Linux**: download the `.AppImage`, `.deb` or `.rpm`. Install
+            `smartmontools` for drive health; the deb and rpm ask for it
+            automatically.
+
+            Prefer not to install anything? Both scripts in `scripts/` run
+            standalone and report the same things.
+
+            ---
+
+            This release bundles smartmontools (GPL-2.0-or-later) to read drive
+            health. Its complete, unmodified source is attached as
+            `smartmontools-*.tar.gz`, and its licence is in the installed files.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      # Attaching the source is a licence obligation, so it runs even when the
+      # bundle step has already created the release.
+      - name: Attach the smartmontools source
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarball=$(find third_party/smartmontools/src -name 'smartmontools-*.tar.gz' | head -1)
+          if [ -z "$tarball" ]; then
+            echo "::error::the smartmontools source tarball is missing, which the licence requires"
+            exit 1
+          fi
+          gh release upload "${{ github.ref_name }}" "$tarball" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

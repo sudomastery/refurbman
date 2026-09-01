@@ -2,6 +2,7 @@
 /node_modules
 /dist
 /src-tauri/target
+/src-tauri/gen
 *.log
 
 # Vendored third-party binaries are fetched by scripts/vendor-smartmontools.*

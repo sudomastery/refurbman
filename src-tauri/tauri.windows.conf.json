@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "resources": {
+      "../third_party/smartmontools/COPYING": "smartmontools-COPYING",
+      "../third_party/smartmontools/SOURCE-OFFER.md": "smartmontools-SOURCE-OFFER.md",
+      "../third_party/smartmontools/bin/windows-x86_64/smartctl.exe": "smartctl.exe",
+      "../third_party/smartmontools/bin/windows-x86_64/drivedb.h": "drivedb.h"
+    }
+  }
+}

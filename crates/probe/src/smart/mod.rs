@@ -73,9 +73,13 @@ impl Smartctl {
         if let Some(dir) = dir {
             v.push(dir.join(name));
             v.push(dir.join("smartmontools").join(name));
-            // Tauri lays resources out beside the executable on Windows and
-            // under ../lib on Linux packages.
+            // Tauri unpacks bundle resources into a "resources" directory
+            // beside the executable on Windows, and under ../lib on Linux
+            // packages. drivedb.h travels with the binary, so smartctl finds
+            // its drive database by sitting in the same directory.
+            v.push(dir.join("resources").join(name));
             v.push(dir.join("..").join("lib").join("refurbman").join(name));
+            v.push(dir.join("..").join("Resources").join(name));
         }
         v
     }

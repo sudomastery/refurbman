@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * The same tokens the exported report uses, so the window and the document a
+ * buyer prints look like one product rather than two.
+ *
+ * Status colours are fixed and never themed. Note that the good green and the
+ * poor red measure 4.1 apart under deuteranopia, well below the readable floor,
+ * so no verdict in this interface is ever carried by colour alone: each one
+ * ships with a shape and a word beside it.
+ */
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb;
+  --surface-2: #f4f4f2;
+  --surface-3: #ecebe8;
+  --line: #e2e1dd;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #7a7873;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+  --neutral: #7a7873;
+  --accent: #2a78d6;
+
+  --good-ink: #067a06;
+  --fair-ink: #8a6000;
+  --poor-ink: #b02a2a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --surface-3: #2c2c2a;
+    --line: #35342f;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --ink-3: #94938b;
+    --accent: #3987e5;
+
+    --good-ink: #3fbf3f;
+    --fair-ink: #fab219;
+    --poor-ink: #e56a6a;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* This is an application window, not a web page: text selection on chrome
+     and the rubber-band overscroll both read as broken here. */
+  overscroll-behavior: none;
+}
+
+/* Only content should be selectable, so a drag on a panel does not paint it
+   blue. */
+.selectable {
+  user-select: text;
+}
+
+@layer utilities {
+  .surface {
+    background: var(--surface);
+  }
+  .surface-2 {
+    background: var(--surface-2);
+  }
+  .surface-3 {
+    background: var(--surface-3);
+  }
+  .ink {
+    color: var(--ink);
+  }
+  .ink-2 {
+    color: var(--ink-2);
+  }
+  .ink-3 {
+    color: var(--ink-3);
+  }
+  .hairline {
+    border-color: var(--line);
+  }
+}
+
+/* A claimed-but-doubted figure. The hatching is the part of the signal that
+   survives greyscale printing and every form of colour blindness. */
+.meter-doubted {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--neutral) 0 5px,
+    color-mix(in oklab, var(--neutral) 30%, var(--surface)) 5px 10px
+  );
+}
+
+.meter-unmeasured {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--line) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+/* Focus rings stay visible for keyboard users and out of the way for mouse
+   users. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+.scanning::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 33%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--accent) 55%, transparent),
+    transparent
+  );
+  animation: sweep 1.15s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanning::after {
+    animation: none;
+    width: 100%;
+    background: color-mix(in oklab, var(--accent) 35%, transparent);
+  }
+}

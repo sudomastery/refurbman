@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "RefurbMan reads hardware and writes a report to a location the user picks. It asks for nothing beyond that: no network, no filesystem access outside the save dialog.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-save",
+    "opener:allow-open-path"
+  ]
+}
