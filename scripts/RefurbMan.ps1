@@ -18,6 +18,10 @@
 .PARAMETER Json
     Emit the findings as JSON instead of the formatted report, for scripting.
 
+.PARAMETER Html
+    Write a self-contained HTML report to this path. Open it in a browser and
+    choose Print, then Save as PDF, for a PDF copy.
+
 .PARAMETER NoColor
     Disable colour, for redirected or logged output.
 
@@ -39,6 +43,7 @@
 [CmdletBinding()]
 param(
     [switch]$Json,
+    [string]$Html,
     [switch]$NoColor,
     # Define the functions and stop, so the test suite can dot-source this file
     # and exercise the parsing and judgement logic without a Windows machine.
@@ -75,7 +80,7 @@ $script:Trust = @{
 
 $script:Findings = New-Object System.Collections.ArrayList
 $script:Report   = [ordered]@{}
-$script:UseColor = -not $NoColor -and -not $Json
+$script:UseColor = -not $NoColor -and -not $Json -and -not $Html
 
 function Write-C {
     param([string]$Text, [string]$Color = 'Gray', [switch]$NoNewline)
@@ -708,6 +713,460 @@ function Write-Legend {
     Write-C ' editable settings. Never used to back a hardware claim.' 'DarkGray'
 }
 
+# ---------------------------------------------------------------------------
+# HTML report
+#
+# One self-contained file: no images, no scripts, no network. Any browser turns
+# it into a PDF with Print, which is why there is no PDF library here. The
+# stylesheet is copied from assets/report.css by scripts/sync-report-css.py,
+# and continuous integration fails if this copy drifts from the original.
+# ---------------------------------------------------------------------------
+
+function Get-ReportCss {
+$css = @'
+:root {
+  color-scheme: light;
+  --surface:      #fcfcfb;
+  --surface-2:    #f4f4f2;
+  --line:         #e2e1dd;
+  --ink:          #0b0b0b;
+  --ink-2:        #52514e;
+  --ink-3:        #7a7873;
+
+  /* Status palette. Fixed, never themed, never reused for anything else. */
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --critical: #d03b3b;
+  --neutral:  #7a7873;
+  --accent:   #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface:   #1a1a19;
+    --surface-2: #232322;
+    --line:      #35342f;
+    --ink:       #ffffff;
+    --ink-2:     #c3c2b7;
+    --ink-3:     #94938b;
+    --accent:    #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface:   #1a1a19;
+  --surface-2: #232322;
+  --line:      #35342f;
+  --ink:       #ffffff;
+  --ink-2:     #c3c2b7;
+  --ink-3:     #94938b;
+  --accent:    #3987e5;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.page { max-width: 60rem; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+
+/* --- masthead --- */
+.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1.25rem; margin-bottom: 2rem; }
+.brand {
+  font-size: .75rem; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.masthead h1 { margin: .35rem 0 .2rem; font-size: 1.9rem; line-height: 1.2; font-weight: 650; }
+.sub { margin: 0; color: var(--ink-2); }
+.stamp { margin: .5rem 0 0; font-size: .8rem; color: var(--ink-3); }
+
+/* --- sections --- */
+.block { margin: 0 0 2.25rem; }
+.block h2 {
+  font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3); margin: 0 0 .9rem; padding-bottom: .4rem;
+  border-bottom: 1px solid var(--line);
+}
+.sub-head { font-size: .95rem; margin: 1.1rem 0 .4rem; font-weight: 620; }
+.lede { margin: 0 0 1rem; color: var(--ink-2); max-width: 46rem; }
+
+/* --- condition cards --- */
+.cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+.card {
+  border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem 1.15rem;
+  background: var(--surface-2); break-inside: avoid;
+}
+.card-top { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+.card h3 { margin: 0; font-size: 1rem; font-weight: 620; overflow-wrap: anywhere; }
+.headline { margin: .7rem 0 0; color: var(--ink-2); }
+
+/* Verdict badge: shape, word and colour together. Under deuteranopia the good
+   green and the poor red are 4.1 apart, so neither the colour nor the shape is
+   allowed to be load-bearing on its own. */
+.badge {
+  display: inline-flex; align-items: center; gap: .3rem; flex: none;
+  font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  padding: .18rem .5rem; border-radius: 99px; border: 1px solid currentColor;
+}
+.badge .mark { font-size: .85em; }
+.b-good    { color: #067a06; }
+.b-fair    { color: #8a6000; }
+.b-poor    { color: #b02a2a; }
+.b-unknown { color: var(--ink-3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .b-good { color: #3fbf3f; }
+  :root:not([data-theme="light"]) .b-fair { color: var(--warning); }
+  :root:not([data-theme="light"]) .b-poor { color: #e56a6a; }
+}
+
+/* --- meters --- */
+.meter-row { margin: .9rem 0 0; }
+.meter-label { font-size: .78rem; color: var(--ink-3); margin-bottom: .3rem; }
+.meter { display: flex; align-items: center; gap: .6rem; }
+.track {
+  position: relative; flex: 1; height: 9px; border-radius: 99px;
+  background: color-mix(in oklab, var(--bar, var(--neutral)) 16%, var(--surface));
+  overflow: hidden;
+}
+.fill { height: 100%; border-radius: 99px; background: var(--bar, var(--neutral)); }
+.meter-value {
+  font-size: .9rem; font-weight: 650; min-width: 4.4rem; text-align: right;
+  color: var(--ink);
+}
+.meter-value.muted { font-weight: 500; color: var(--ink-3); font-size: .82rem; }
+.v-good    { --bar: var(--good); }
+.v-fair    { --bar: var(--warning); }
+.v-poor    { --bar: var(--critical); }
+.v-unknown { --bar: var(--neutral); }
+.trust     { --bar: var(--accent); margin: 0 0 1.2rem; }
+
+/* A claimed-but-doubted figure. The hatching is the part of the signal that
+   survives greyscale printing and every form of colour blindness. */
+.meter.doubted .fill {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--neutral) 0 5px,
+    color-mix(in oklab, var(--neutral) 30%, var(--surface)) 5px 10px);
+}
+.meter.doubted .meter-value { color: var(--ink-3); font-weight: 500; }
+.qualifier {
+  display: block; font-size: .6rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink-3); line-height: 1.3;
+}
+.meter.unmeasured .track {
+  background: repeating-linear-gradient(135deg, var(--line) 0 4px, transparent 4px 8px);
+}
+
+/* --- fact lists --- */
+.facts { margin: .9rem 0 0; display: grid; gap: .3rem 1.5rem; }
+.facts.wide { grid-template-columns: repeat(auto-fit, minmax(25rem, 1fr)); }
+.fact {
+  display: flex; align-items: baseline; gap: .6rem;
+  border-bottom: 1px solid var(--line); padding: .3rem 0;
+}
+.fact dt { flex: none; width: 9rem; color: var(--ink-3); font-size: .85rem; }
+.fact dd {
+  margin: 0; flex: 1; display: flex; align-items: baseline;
+  justify-content: space-between; gap: .6rem; overflow-wrap: anywhere;
+}
+
+/* Provenance chip. Deliberately quiet: it qualifies a reading, it is not the
+   reading. */
+.chip {
+  flex: none; font-size: .6rem; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; padding: .1rem .38rem; border-radius: 4px;
+  border: 1px solid var(--line); color: var(--ink-3); background: var(--surface);
+  white-space: nowrap;
+}
+.t4 { color: #067a06; border-color: currentColor; }
+.t3 { color: #1f6f8b; border-color: currentColor; }
+.t2 { color: #3a5ea8; border-color: currentColor; }
+.t1 { color: var(--ink-3); }
+.t0 { color: #8a6000; border-color: currentColor; }
+
+/* --- checks --- */
+.checks, .findings, .plain { list-style: none; margin: 0; padding: 0; }
+.check { display: flex; gap: .7rem; padding: .55rem 0; border-bottom: 1px solid var(--line); }
+.check .mark { flex: none; width: 1.2rem; text-align: center; font-weight: 700; }
+.check-title { margin: 0; font-weight: 600; font-size: .93rem; }
+.check-word {
+  font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  margin-left: .4rem; padding: .05rem .35rem; border-radius: 4px;
+  border: 1px solid currentColor;
+}
+.check-detail { margin: .2rem 0 0; color: var(--ink-2); font-size: .88rem; }
+.check.pass { color: #067a06; }
+.check.look { color: #8a6000; }
+.check.fail { color: #b02a2a; }
+.check.skip { color: var(--ink-3); }
+.check.pass .check-detail, .check.skip .check-detail { color: var(--ink-3); }
+.check-title, .check.look .check-detail, .check.fail .check-detail { color: var(--ink); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .check.pass { color: #3fbf3f; }
+  :root:not([data-theme="light"]) .check.fail { color: #e56a6a; }
+  :root:not([data-theme="light"]) .check.look { color: var(--warning); }
+  :root:not([data-theme="light"]) .t4 { color: #3fbf3f; }
+  :root:not([data-theme="light"]) .t3 { color: #6fc4dd; }
+  :root:not([data-theme="light"]) .t2 { color: #8fb0f0; }
+  :root:not([data-theme="light"]) .t0 { color: var(--warning); }
+}
+
+/* --- findings --- */
+.finding {
+  border-left: 3px solid currentColor; padding: .55rem 0 .55rem .85rem;
+  margin: 0 0 1rem; break-inside: avoid;
+}
+.f-head { margin: 0; font-weight: 650; color: var(--ink); }
+.f-head .mark { font-weight: 700; margin-right: .4rem; }
+.f-word {
+  font-size: .66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  margin-right: .55rem; padding: .08rem .38rem; border-radius: 4px;
+  border: 1px solid currentColor;
+}
+.f-detail { margin: .3rem 0 0; color: var(--ink-2); max-width: 46rem; }
+.evidence {
+  margin: .35rem 0 0; font-size: .78rem; color: var(--ink-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.finding.critical { color: #b02a2a; }
+.finding.warn     { color: #8a6000; }
+.finding.info     { color: var(--ink-3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .finding.critical { color: #e56a6a; }
+  :root:not([data-theme="light"]) .finding.warn     { color: var(--warning); }
+}
+
+/* --- legend --- */
+.legend { display: grid; grid-template-columns: auto 1fr; gap: .35rem .8rem; margin: 0; }
+.legend dt { margin: 0; }
+.legend dd { margin: 0; color: var(--ink-2); font-size: .88rem; }
+
+/* --- footer --- */
+.disclaimer {
+  margin-top: 2.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
+  color: var(--ink-2); font-size: .88rem; break-inside: avoid;
+}
+.disclaimer strong { color: var(--ink); }
+.fine { color: var(--ink-3); font-size: .8rem; }
+.plain li { padding: .3rem 0; color: var(--ink-2); border-bottom: 1px solid var(--line); }
+
+/* --- print --- */
+@page { margin: 16mm 14mm; }
+@media print {
+  :root {
+    color-scheme: light;
+    --surface: #fff; --surface-2: #fff; --line: #ccc;
+    --ink: #000; --ink-2: #333; --ink-3: #555;
+  }
+  body { font-size: 10.5pt; background: #fff; }
+  .page { max-width: none; padding: 0; }
+  .block { break-inside: auto; }
+  .block h2 { break-after: avoid; }
+  .card, .finding, .check, .disclaimer { break-inside: avoid; }
+  .cards { grid-template-columns: 1fr 1fr; }
+  /* Browsers drop backgrounds by default, which would erase every meter. */
+  .track, .fill, .badge, .chip { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  a[href]::after { content: ""; }
+}
+'@
+    return $css
+}
+
+function Get-MachineTitle {
+    param($Machine)
+    $vendor = $Machine.Manufacturer
+    $model  = $Machine.Model
+    if ($vendor -and $model -and $model.StartsWith("$vendor ")) { return $model }
+    $t = (@($vendor, $model) | Where-Object { $_ }) -join ' '
+    if ($t) { return $t }
+    return 'Unidentified machine'
+}
+
+function ConvertTo-HtmlText {
+    # These values came off hardware on a machine you did not build, so they are
+    # escaped rather than trusted.
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $Text.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;').
+          Replace('"', '&quot;').Replace("'", '&#39;')
+}
+
+function New-HtmlRow {
+    param([string]$Label, $Value, [int]$Rank = 2, [string]$Trust = 'SYSTEM FIRMWARE', [string]$Unit = '')
+    if ($null -eq $Value -or "$Value" -eq '') { return '' }
+    $text = if ($Unit) { "$Value $Unit" } else { "$Value" }
+    '<div class="fact"><dt>{0}</dt><dd>{1}<span class="chip t{2}">{3}</span></dd></div>' -f `
+        (ConvertTo-HtmlText $Label), (ConvertTo-HtmlText $text), $Rank, $Trust
+}
+
+function New-HtmlBadge {
+    param([string]$Verdict)
+    switch ($Verdict) {
+        'Good' { '<span class="badge b-good"><span class="mark" aria-hidden="true">&#10003;</span>Good</span>' }
+        'Fair' { '<span class="badge b-fair"><span class="mark" aria-hidden="true">&#33;</span>Fair</span>' }
+        'Poor' { '<span class="badge b-poor"><span class="mark" aria-hidden="true">&#10007;</span>Poor</span>' }
+        default { '<span class="badge b-unknown"><span class="mark" aria-hidden="true">&#63;</span>Not known</span>' }
+    }
+}
+
+function New-HtmlMeter {
+    param([string]$Label, $Percent, [string]$Verdict)
+    $slug = $Verdict.ToLowerInvariant()
+    $out = '<div class="meter-row"><div class="meter-label">{0}</div>' -f (ConvertTo-HtmlText $Label)
+    if ($null -eq $Percent) {
+        return $out + '<div class="meter unmeasured"><div class="track"></div>' +
+               '<div class="meter-value muted">not reported</div></div></div>'
+    }
+    # A figure we do not believe gets a hatched fill: a solid bar at 100% reads
+    # as excellent at a glance, which is the opposite of what Not known means.
+    $extra = ''; $qual = ''
+    if ($Verdict -eq 'Unknown') { $extra = ' doubted'; $qual = '<span class="qualifier">claimed</span>' }
+    $out + ('<div class="meter v-{0}{1}"><div class="track"><div class="fill" style="width:{2:N1}%"></div></div>' -f $slug, $extra, $Percent) +
+           ('<div class="meter-value">{0:N0}%{1}</div></div></div>' -f $Percent, $qual)
+}
+
+function Export-HtmlReport {
+    param(
+        [string]$Path, $Machine, $Cpus, $Slots, $Batteries, $Drives,
+        $DriveVerdicts, $BatteryVerdicts, $KernelMemBytes, $SlotTotalBytes,
+        [bool]$IsAdmin
+    )
+
+    # Manufacturers often repeat themselves: "HP" alongside "HP Pavilion Aero"
+    # should read as one name, not two.
+    $title = Get-MachineTitle $Machine
+    $t = ConvertTo-HtmlText $title
+
+    $sb = New-Object System.Text.StringBuilder
+    $add = { param($x) [void]$sb.AppendLine($x) }
+
+    & $add '<!doctype html>'
+    & $add '<html lang="en">'
+    & $add '<head>'
+    & $add '<meta charset="utf-8">'
+    & $add '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    & $add "<title>RefurbMan report: $t</title>"
+    & $add '<style>'
+    & $add (Get-ReportCss)
+    & $add '</style></head><body><main class="page">'
+
+    & $add '<header class="masthead"><div class="brand">RefurbMan</div>'
+    & $add "<h1>$t</h1>"
+    if ($Machine.Chassis) { & $add ('<p class="sub">{0}</p>' -f (ConvertTo-HtmlText $Machine.Chassis)) }
+    & $add ('<p class="stamp">Checked {0} &middot; RefurbMan PowerShell &middot; {1} scan</p></header>' -f `
+        (Get-Date).ToUniversalTime().ToString('o'), $(if ($IsAdmin) { 'full' } else { 'limited' }))
+
+    # --- condition ---
+    if ($Drives.Count -gt 0 -or $Batteries.Count -gt 0) {
+        & $add '<section class="block"><h2>Condition of the parts that wear out</h2><div class="cards">'
+        foreach ($d in $Drives) {
+            $v = $DriveVerdicts[$d.Model]
+            & $add ('<article class="card v-{0}"><div class="card-top"><h3>{1}</h3>{2}</div>' -f `
+                $v.Verdict.ToLowerInvariant(), (ConvertTo-HtmlText $d.Model), (New-HtmlBadge $v.Verdict))
+            & $add (New-HtmlMeter 'Life remaining' $v.Percent $v.Verdict)
+            & $add ('<p class="headline">{0}</p><dl class="facts">' -f (ConvertTo-HtmlText $v.Headline))
+            & $add (New-HtmlRow 'Capacity' (Format-Bytes $d.SizeBytes) 3 'KERNEL')
+            & $add (New-HtmlRow 'Type' ((@($d.MediaType, $d.BusType) | Where-Object { $_ }) -join ' / ') 3 'KERNEL')
+            if ($null -ne $d.PowerOnHours) { & $add (New-HtmlRow 'Powered on for' (Format-Hours $d.PowerOnHours) 4 'DEVICE FIRMWARE') }
+            if ($null -ne $d.TemperatureC) { & $add (New-HtmlRow 'Temperature' $d.TemperatureC 4 'DEVICE FIRMWARE' 'C') }
+            & $add (New-HtmlRow 'Drive self-check' $d.SelfAssessment 4 'DEVICE FIRMWARE')
+            & $add '</dl></article>'
+        }
+        foreach ($b in $Batteries) {
+            $v = $BatteryVerdicts[$b.Name]
+            & $add ('<article class="card v-{0}"><div class="card-top"><h3>{1}</h3>{2}</div>' -f `
+                $v.Verdict.ToLowerInvariant(), (ConvertTo-HtmlText $b.Name), (New-HtmlBadge $v.Verdict))
+            & $add (New-HtmlMeter 'Capacity remaining' $v.Percent $v.Verdict)
+            & $add ('<p class="headline">{0}</p><dl class="facts">' -f (ConvertTo-HtmlText $v.Headline))
+            if ($null -ne $b.CycleCount) { & $add (New-HtmlRow 'Charge cycles' $b.CycleCount 4 'DEVICE FIRMWARE') }
+            if ($b.DesignedmWh -gt 0) { & $add (New-HtmlRow 'Capacity when new' $b.DesignedmWh 4 'DEVICE FIRMWARE' 'mWh') }
+            if ($b.CurrentmWh -gt 0)  { & $add (New-HtmlRow 'Capacity now' $b.CurrentmWh 4 'DEVICE FIRMWARE' 'mWh') }
+            & $add (New-HtmlRow 'Chemistry' $b.Chemistry 4 'DEVICE FIRMWARE')
+            & $add '</dl></article>'
+        }
+        & $add '</div></section>'
+    }
+
+    # --- identity ---
+    & $add '<section class="block"><h2>This machine</h2><dl class="facts wide">'
+    & $add (New-HtmlRow 'Manufacturer'  $Machine.Manufacturer)
+    & $add (New-HtmlRow 'Model'         $Machine.Model)
+    & $add (New-HtmlRow 'Family'        $Machine.Family)
+    & $add (New-HtmlRow 'Serial number' $Machine.SerialNumber)
+    & $add (New-HtmlRow 'Form'          $Machine.Chassis)
+    & $add (New-HtmlRow 'Motherboard'   ((@($Machine.BoardVendor, $Machine.BoardModel) | Where-Object { $_ }) -join ' '))
+    & $add (New-HtmlRow 'BIOS'          ((@($Machine.BiosVendor, $Machine.BiosVersion, $Machine.BiosDate) | Where-Object { $_ }) -join ' '))
+    & $add '</dl></section>'
+
+    # --- processor ---
+    if ($Cpus.Count -gt 0) {
+        & $add '<section class="block"><h2>Processor</h2>'
+        foreach ($c in $Cpus) {
+            & $add '<dl class="facts wide">'
+            & $add (New-HtmlRow 'Processor' $c.Model)
+            & $add (New-HtmlRow 'Socket'    $c.Socket)
+            if ($c.Contains('Cores'))   { & $add (New-HtmlRow 'Cores'   $c.Cores) }
+            if ($c.Contains('Threads')) { & $add (New-HtmlRow 'Threads' $c.Threads) }
+            if ($c.MaxSpeedMhz) { & $add (New-HtmlRow 'Maximum speed' $c.MaxSpeedMhz 2 'SYSTEM FIRMWARE' 'MHz') }
+            & $add '</dl>'
+        }
+        & $add '</section>'
+    }
+
+    # --- memory ---
+    & $add '<section class="block"><h2>Memory</h2><dl class="facts wide">'
+    if ($SlotTotalBytes -gt 0) { & $add (New-HtmlRow 'Installed' (Format-Bytes $SlotTotalBytes)) }
+    if ($KernelMemBytes) { & $add (New-HtmlRow 'Windows can see' (Format-Bytes $KernelMemBytes) 3 'KERNEL') }
+    & $add '</dl>'
+    foreach ($s in ($Slots | Where-Object { $_.Populated })) {
+        & $add ('<h3 class="sub-head">{0}</h3><dl class="facts wide">' -f (ConvertTo-HtmlText $s.Slot))
+        & $add (New-HtmlRow 'Size' (Format-Bytes $s.Bytes))
+        & $add (New-HtmlRow 'Type' $s.Type)
+        & $add (New-HtmlRow 'Running at' $s.ConfiguredMts 2 'SYSTEM FIRMWARE' 'MT/s')
+        & $add (New-HtmlRow 'Made by' $s.Manufacturer)
+        & $add (New-HtmlRow 'Part number' $s.PartNumber)
+        & $add '</dl>'
+    }
+    & $add '</section>'
+
+    # --- findings ---
+    & $add '<section class="block"><h2>What you should know</h2>'
+    if ($script:Findings.Count -eq 0) {
+        & $add '<p class="lede">Nothing of concern was found.</p></section>'
+    } else {
+        & $add '<ul class="findings">'
+        $order = @{ Critical = 0; Warn = 1; Info = 2 }
+        foreach ($f in ($script:Findings | Sort-Object { $order[$_.Severity] })) {
+            $cls  = $f.Severity.ToLowerInvariant()
+            $mark = switch ($f.Severity) { 'Critical' { '&#10007;' } 'Warn' { '&#33;' } default { '&#105;' } }
+            $word = switch ($f.Severity) { 'Critical' { 'Serious' } 'Warn' { 'Worth knowing' } default { 'For information' } }
+            & $add ('<li class="finding {0}"><p class="f-head"><span class="mark" aria-hidden="true">{1}</span><span class="f-word">{2}</span>{3}</p><p class="f-detail">{4}</p>' -f `
+                $cls, $mark, $word, (ConvertTo-HtmlText $f.Title), (ConvertTo-HtmlText $f.Detail))
+            if ($f.Evidence) { & $add ('<p class="evidence">{0}</p>' -f (ConvertTo-HtmlText $f.Evidence)) }
+            & $add '</li>'
+        }
+        & $add '</ul></section>'
+    }
+
+    # --- provenance ---
+    & $add '<section class="block"><h2>Where these readings came from</h2><dl class="legend">'
+    & $add '<dt><span class="chip t4">DEVICE FIRMWARE</span></dt><dd>The part itself reported this. Changing it means reflashing the part.</dd>'
+    & $add '<dt><span class="chip t3">KERNEL</span></dt><dd>Windows'' own view of the hardware.</dd>'
+    & $add '<dt><span class="chip t2">SYSTEM FIRMWARE</span></dt><dd>The motherboard firmware tables. Changing them means reflashing the BIOS.</dd>'
+    & $add '</dl></section>'
+
+    & $add '<footer class="disclaimer"><p><strong>What this report is, and is not.</strong> It raises the effort needed to deceive you from editing a registry value to reflashing firmware. It is not proof. There is no signing chain here and no hardware attestation, so somebody with deep enough access to this machine can still lie to it. Treat this as strong evidence rather than a guarantee, and weigh it against how the machine actually behaves.</p>'
+    & $add '<p class="fine">Generated by RefurbMan, which reads from the Windows kernel, the motherboard firmware tables, and the parts themselves, and never from the registry.</p></footer>'
+    & $add '</main></body></html>'
+
+    [System.IO.File]::WriteAllText($Path, $sb.ToString(), [System.Text.UTF8Encoding]::new($false))
+}
+
 if ($LoadOnly) { return }
 
 $script:IsWindowsHost = $true
@@ -775,6 +1234,16 @@ foreach ($d in $drives)    { $driveVerdicts[$d.Model]   = Get-DriveVerdict   $d 
 $batteryVerdicts = @{}
 foreach ($b in $batteries) { $batteryVerdicts[$b.Name]  = Get-BatteryVerdict $b }
 
+if ($Html) {
+    Export-HtmlReport -Path $Html -Machine $machine -Cpus $cpus -Slots $slots `
+        -Batteries $batteries -Drives $drives -DriveVerdicts $driveVerdicts `
+        -BatteryVerdicts $batteryVerdicts -KernelMemBytes $kernelMemBytes `
+        -SlotTotalBytes $slotTotalBytes -IsAdmin $isAdmin
+    Write-Host "Report written to $Html"
+    Write-Host 'Open it in a browser and choose Print, then Save as PDF, for a PDF copy.'
+    return
+}
+
 if ($Json) {
     [pscustomobject]@{
         GeneratedAt       = (Get-Date).ToUniversalTime().ToString('o')
@@ -796,7 +1265,7 @@ Write-Banner
 
 # --- Identity ---------------------------------------------------------------
 Write-Rule 'This machine'
-$title = Join-Parts @($machine.Manufacturer, $machine.Model)
+$title = Get-MachineTitle $machine
 if ($title) {
     Write-Host ''
     Write-C "  $title" 'White'

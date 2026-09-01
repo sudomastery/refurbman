@@ -229,8 +229,18 @@ mod tests {
             assert!(!f.source.is_empty(), "fact {key} has no source");
         }
 
-        // And the checks must actually run rather than all being skipped.
-        let (passed, _, _) = check_tally(&r);
-        assert!(passed > 0, "no consistency check managed to run");
+        // The checks must actually run rather than all being skipped. Note
+        // that "passed" is the wrong thing to assert on: continuous
+        // integration runs inside a virtual machine, where the physical
+        // hardware check correctly fails.
+        let (passed, failed, skipped) = check_tally(&r);
+        assert!(
+            !r.tamper_checks.is_empty(),
+            "no consistency checks were built"
+        );
+        assert!(
+            passed + failed > 0,
+            "every consistency check was skipped ({skipped} skipped)"
+        );
     }
 }

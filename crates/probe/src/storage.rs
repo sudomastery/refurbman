@@ -5,8 +5,8 @@
 //! Only the health questions need to reach the device, so a locked scan still
 //! shows the machine's storage rather than an empty section.
 
-use crate::fact::{derived, kernel};
-use crate::report::{Consumable, Facts, Verdict};
+use crate::fact::derived;
+use crate::report::{Consumable, Facts};
 use crate::smart::{parse, Smartctl};
 
 pub struct Storage {
@@ -104,7 +104,9 @@ fn same_device(kernel_node: &str, smart_name: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 fn kernel_drives() -> Vec<(String, Consumable)> {
+    use crate::fact::kernel;
     use crate::platform::linux::{read_trimmed, read_u64};
+    use crate::report::Verdict;
 
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir("/sys/block") else {

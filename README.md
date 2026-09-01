@@ -87,6 +87,23 @@ report says so rather than leaving a gap.
 
 Add `--json` (or `-Json` on Windows) for machine-readable output.
 
+### Keeping a copy
+
+Any of the three can write a report you can keep, print, or send to a seller:
+
+```bash
+./scripts/refurbman.sh --html report.html          # Linux
+```
+```powershell
+.\scripts\RefurbMan.ps1 -Html report.html          # Windows
+```
+
+The result is one self-contained file with no images, scripts, or network
+requests, so it opens anywhere and can be archived or emailed as is. Open it in
+a browser and choose Print, then Save as PDF, for a PDF copy. There is no PDF
+library here on purpose: every machine that can read the report already has a
+browser that makes better PDFs than a bundled engine would.
+
 A word on pasting commands from the internet: you should not do this without
 looking first, and that applies here too. Both scripts are plain text in this
 repository, they only read, and they send nothing anywhere. Read them before you

@@ -24,6 +24,24 @@ fn main() {
 
     let report = scan::run();
 
+    // --html <path> writes a self-contained document. Any browser turns it
+    // into a PDF with Print, which avoids bundling a PDF engine for a job the
+    // reader already has one for.
+    if let Some(i) = args.iter().position(|a| a == "--html") {
+        let Some(path) = args.get(i + 1) else {
+            eprintln!("--html needs a file to write to, for example: --html report.html");
+            std::process::exit(2);
+        };
+        let html = refurbman_probe::report_html::render(&report);
+        if let Err(e) = std::fs::write(path, html) {
+            eprintln!("Could not write {path}: {e}");
+            std::process::exit(1);
+        }
+        println!("Report written to {path}");
+        println!("Open it in a browser and choose Print, then Save as PDF, for a PDF copy.");
+        return;
+    }
+
     if json {
         match serde_json::to_string_pretty(&report) {
             Ok(s) => println!("{s}"),
@@ -50,6 +68,7 @@ USAGE:
 
 OPTIONS:
     -j, --json        Emit the full report as JSON
+        --html FILE   Write a self-contained HTML report, ready to print to PDF
         --no-color    Disable colour
     -h, --help        Show this help
     -V, --version     Show the version

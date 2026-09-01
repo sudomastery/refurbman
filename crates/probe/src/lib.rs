@@ -14,6 +14,7 @@ pub mod cpu;
 pub mod fact;
 pub mod platform;
 pub mod report;
+pub mod report_html;
 pub mod scan;
 pub mod smart;
 pub mod smbios;

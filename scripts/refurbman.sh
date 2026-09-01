@@ -15,6 +15,7 @@
 #   ./refurbman.sh                # full report
 #   sudo ./refurbman.sh           # adds drive health and memory slot detail
 #   ./refurbman.sh --json         # machine-readable
+#   ./refurbman.sh --html r.html  # a report you can print to PDF
 #   ./refurbman.sh --no-color     # for logs and pipes
 #
 # Run without installing anything:
@@ -27,9 +28,14 @@ set -uo pipefail
 
 JSON=0
 COLOR=1
+HTML_OUT=""
+want_html=0
 for arg in "$@"; do
+  if [ "$want_html" = 1 ]; then HTML_OUT="$arg"; want_html=0; continue; fi
   case "$arg" in
     --json)     JSON=1; COLOR=0 ;;
+    --html)     want_html=1; COLOR=0 ;;
+    --html=*)   HTML_OUT="${arg#--html=}"; COLOR=0 ;;
     --no-color) COLOR=0 ;;
     -h|--help)
       if [ -r "$0" ]; then sed -n '3,25p' "$0" | sed 's/^# \{0,1\}//'
@@ -47,11 +53,11 @@ done
 # ---------------------------------------------------------------------------
 
 if [ "$COLOR" = 1 ]; then
-  R=$'\033[0m'; BOLD=$'\033[1m'; DIM=$'\033[2m'
+  R=$'\033[0m'; BOLD=$'\033[1m'
   RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'
   BLUE=$'\033[34m'; CYAN=$'\033[36m'; GRAY=$'\033[90m'
 else
-  R=''; BOLD=''; DIM=''; RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; GRAY=''
+  R=''; BOLD=''; RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; GRAY=''
 fi
 
 trust_label() {
@@ -224,6 +230,13 @@ collect_machine() {
   M_BOARD="$(clean "$(read_file $DMI/board_vendor) $(read_file $DMI/board_name)")"
   M_BIOS="$(clean "$(read_file $DMI/bios_vendor) $(read_file $DMI/bios_version) $(read_file $DMI/bios_date)")"
 
+  # Manufacturers often repeat themselves: sys_vendor "HP" alongside
+  # product_name "HP Pavilion Aero" should read as one name, not two.
+  case "$M_MODEL" in
+    "$M_VENDOR "*) MACHINE_TITLE="$M_MODEL" ;;
+    *) MACHINE_TITLE="$(printf '%s %s' "$M_VENDOR" "$M_MODEL" | sed 's/^ *//; s/ *$//')" ;;
+  esac
+
   local ct; ct="$(read_file $DMI/chassis_type)"
   case "${ct:-0}" in
     3) M_CHASSIS="Desktop" ;;  4) M_CHASSIS="Low profile desktop" ;;
@@ -371,9 +384,9 @@ collect_battery() {
       fi
     fi
 
-    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' \
+    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' \
       "${model:-$name}" "${mfr:-}" "${tech:-}" "${cycles:-}" "${health:-}" \
-      "${design_wh:-}" "${now_wh:-}" "${status:-}" "$d" >> "$BATT_FILE"
+      "${design_wh:-}" "${now_wh:-}" "${status:-}" >> "$BATT_FILE"
   done
 }
 
@@ -431,7 +444,7 @@ collect_drives() {
   DRIVE_FILE="$(mktemp)"
   command -v smartctl >/dev/null 2>&1 && HAVE_SMARTCTL=1
 
-  local d name size bytes rot model serial fw
+  local d name size bytes rot model fw
 
   for d in /sys/block/*; do
     name="$(basename "$d")"
@@ -460,10 +473,10 @@ collect_drives() {
       fi
     fi
 
-    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' \
+    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' \
       "$model" "$bytes" "${rot:-}" "${fw:-}" "$locked" \
       "${wear:-}" "${hours:-}" "${temp:-}" "${passed:-}" \
-      "${reall:-}" "${pend:-}" "${uncorr:-}" "${crc:-}" "${media:-}" >> "$DRIVE_FILE"
+      "${reall:-}" "${pend:-}" "${uncorr:-}" "${crc:-}" "${media:-}" "${written:-}" >> "$DRIVE_FILE"
   done
 }
 
@@ -645,6 +658,441 @@ assess_drive() {
 }
 
 # ---------------------------------------------------------------------------
+# HTML report
+#
+# One self-contained file: no images, no scripts, no network. Any browser turns
+# it into a PDF with Print, which is why there is no PDF library here. The
+# stylesheet below is copied from assets/report.css by
+# scripts/sync-report-css.py, and continuous integration fails if the copy
+# drifts.
+# ---------------------------------------------------------------------------
+
+html_esc() {
+  # Values here came off hardware on a machine you did not build, so they are
+  # escaped rather than trusted.
+  printf '%s' "${1:-}" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g'
+}
+
+html_row() {
+  # html_row <label> <value> <trust-rank> <trust-label> [unit]
+  [ -z "${2:-}" ] && return
+  local val="$2"
+  [ -n "${5:-}" ] && val="$val $5"
+  printf '<div class="fact"><dt>%s</dt><dd>%s<span class="chip t%s">%s</span></dd></div>\n' \
+    "$(html_esc "$1")" "$(html_esc "$val")" "$3" "$4"
+}
+
+html_badge() {
+  case "$1" in
+    good)    printf '<span class="badge b-good"><span class="mark" aria-hidden="true">&#10003;</span>Good</span>' ;;
+    fair)    printf '<span class="badge b-fair"><span class="mark" aria-hidden="true">&#33;</span>Fair</span>' ;;
+    poor)    printf '<span class="badge b-poor"><span class="mark" aria-hidden="true">&#10007;</span>Poor</span>' ;;
+    *)       printf '<span class="badge b-unknown"><span class="mark" aria-hidden="true">&#63;</span>Not known</span>' ;;
+  esac
+}
+
+html_meter() {
+  # html_meter <label> <percent|""> <verdict>
+  printf '<div class="meter-row"><div class="meter-label">%s</div>\n' "$(html_esc "$1")"
+  if [ -z "${2:-}" ]; then
+    printf '<div class="meter unmeasured"><div class="track"></div><div class="meter-value muted">not reported</div></div></div>\n'
+    return
+  fi
+  local extra="" qual=""
+  if [ "$3" = "unknown" ]; then
+    extra=" doubted"
+    qual='<span class="qualifier">claimed</span>'
+  fi
+  printf '<div class="meter v-%s%s"><div class="track"><div class="fill" style="width:%.1f%%"></div></div><div class="meter-value">%.0f%%%s</div></div></div>\n' \
+    "$3" "$extra" "$2" "$2" "$qual"
+}
+
+emit_html() {
+  local title
+  title="$(html_esc "$MACHINE_TITLE")"
+  [ -z "$title" ] && title="Unidentified machine"
+
+  printf '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+  printf '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+  printf '<title>RefurbMan report: %s</title>\n<style>\n' "$title"
+  cat <<'REFURBMAN_CSS'
+:root {
+  color-scheme: light;
+  --surface:      #fcfcfb;
+  --surface-2:    #f4f4f2;
+  --line:         #e2e1dd;
+  --ink:          #0b0b0b;
+  --ink-2:        #52514e;
+  --ink-3:        #7a7873;
+
+  /* Status palette. Fixed, never themed, never reused for anything else. */
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --critical: #d03b3b;
+  --neutral:  #7a7873;
+  --accent:   #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface:   #1a1a19;
+    --surface-2: #232322;
+    --line:      #35342f;
+    --ink:       #ffffff;
+    --ink-2:     #c3c2b7;
+    --ink-3:     #94938b;
+    --accent:    #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface:   #1a1a19;
+  --surface-2: #232322;
+  --line:      #35342f;
+  --ink:       #ffffff;
+  --ink-2:     #c3c2b7;
+  --ink-3:     #94938b;
+  --accent:    #3987e5;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.page { max-width: 60rem; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+
+/* --- masthead --- */
+.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1.25rem; margin-bottom: 2rem; }
+.brand {
+  font-size: .75rem; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.masthead h1 { margin: .35rem 0 .2rem; font-size: 1.9rem; line-height: 1.2; font-weight: 650; }
+.sub { margin: 0; color: var(--ink-2); }
+.stamp { margin: .5rem 0 0; font-size: .8rem; color: var(--ink-3); }
+
+/* --- sections --- */
+.block { margin: 0 0 2.25rem; }
+.block h2 {
+  font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3); margin: 0 0 .9rem; padding-bottom: .4rem;
+  border-bottom: 1px solid var(--line);
+}
+.sub-head { font-size: .95rem; margin: 1.1rem 0 .4rem; font-weight: 620; }
+.lede { margin: 0 0 1rem; color: var(--ink-2); max-width: 46rem; }
+
+/* --- condition cards --- */
+.cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+.card {
+  border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem 1.15rem;
+  background: var(--surface-2); break-inside: avoid;
+}
+.card-top { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+.card h3 { margin: 0; font-size: 1rem; font-weight: 620; overflow-wrap: anywhere; }
+.headline { margin: .7rem 0 0; color: var(--ink-2); }
+
+/* Verdict badge: shape, word and colour together. Under deuteranopia the good
+   green and the poor red are 4.1 apart, so neither the colour nor the shape is
+   allowed to be load-bearing on its own. */
+.badge {
+  display: inline-flex; align-items: center; gap: .3rem; flex: none;
+  font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  padding: .18rem .5rem; border-radius: 99px; border: 1px solid currentColor;
+}
+.badge .mark { font-size: .85em; }
+.b-good    { color: #067a06; }
+.b-fair    { color: #8a6000; }
+.b-poor    { color: #b02a2a; }
+.b-unknown { color: var(--ink-3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .b-good { color: #3fbf3f; }
+  :root:not([data-theme="light"]) .b-fair { color: var(--warning); }
+  :root:not([data-theme="light"]) .b-poor { color: #e56a6a; }
+}
+
+/* --- meters --- */
+.meter-row { margin: .9rem 0 0; }
+.meter-label { font-size: .78rem; color: var(--ink-3); margin-bottom: .3rem; }
+.meter { display: flex; align-items: center; gap: .6rem; }
+.track {
+  position: relative; flex: 1; height: 9px; border-radius: 99px;
+  background: color-mix(in oklab, var(--bar, var(--neutral)) 16%, var(--surface));
+  overflow: hidden;
+}
+.fill { height: 100%; border-radius: 99px; background: var(--bar, var(--neutral)); }
+.meter-value {
+  font-size: .9rem; font-weight: 650; min-width: 4.4rem; text-align: right;
+  color: var(--ink);
+}
+.meter-value.muted { font-weight: 500; color: var(--ink-3); font-size: .82rem; }
+.v-good    { --bar: var(--good); }
+.v-fair    { --bar: var(--warning); }
+.v-poor    { --bar: var(--critical); }
+.v-unknown { --bar: var(--neutral); }
+.trust     { --bar: var(--accent); margin: 0 0 1.2rem; }
+
+/* A claimed-but-doubted figure. The hatching is the part of the signal that
+   survives greyscale printing and every form of colour blindness. */
+.meter.doubted .fill {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--neutral) 0 5px,
+    color-mix(in oklab, var(--neutral) 30%, var(--surface)) 5px 10px);
+}
+.meter.doubted .meter-value { color: var(--ink-3); font-weight: 500; }
+.qualifier {
+  display: block; font-size: .6rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink-3); line-height: 1.3;
+}
+.meter.unmeasured .track {
+  background: repeating-linear-gradient(135deg, var(--line) 0 4px, transparent 4px 8px);
+}
+
+/* --- fact lists --- */
+.facts { margin: .9rem 0 0; display: grid; gap: .3rem 1.5rem; }
+.facts.wide { grid-template-columns: repeat(auto-fit, minmax(25rem, 1fr)); }
+.fact {
+  display: flex; align-items: baseline; gap: .6rem;
+  border-bottom: 1px solid var(--line); padding: .3rem 0;
+}
+.fact dt { flex: none; width: 9rem; color: var(--ink-3); font-size: .85rem; }
+.fact dd {
+  margin: 0; flex: 1; display: flex; align-items: baseline;
+  justify-content: space-between; gap: .6rem; overflow-wrap: anywhere;
+}
+
+/* Provenance chip. Deliberately quiet: it qualifies a reading, it is not the
+   reading. */
+.chip {
+  flex: none; font-size: .6rem; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; padding: .1rem .38rem; border-radius: 4px;
+  border: 1px solid var(--line); color: var(--ink-3); background: var(--surface);
+  white-space: nowrap;
+}
+.t4 { color: #067a06; border-color: currentColor; }
+.t3 { color: #1f6f8b; border-color: currentColor; }
+.t2 { color: #3a5ea8; border-color: currentColor; }
+.t1 { color: var(--ink-3); }
+.t0 { color: #8a6000; border-color: currentColor; }
+
+/* --- checks --- */
+.checks, .findings, .plain { list-style: none; margin: 0; padding: 0; }
+.check { display: flex; gap: .7rem; padding: .55rem 0; border-bottom: 1px solid var(--line); }
+.check .mark { flex: none; width: 1.2rem; text-align: center; font-weight: 700; }
+.check-title { margin: 0; font-weight: 600; font-size: .93rem; }
+.check-word {
+  font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  margin-left: .4rem; padding: .05rem .35rem; border-radius: 4px;
+  border: 1px solid currentColor;
+}
+.check-detail { margin: .2rem 0 0; color: var(--ink-2); font-size: .88rem; }
+.check.pass { color: #067a06; }
+.check.look { color: #8a6000; }
+.check.fail { color: #b02a2a; }
+.check.skip { color: var(--ink-3); }
+.check.pass .check-detail, .check.skip .check-detail { color: var(--ink-3); }
+.check-title, .check.look .check-detail, .check.fail .check-detail { color: var(--ink); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .check.pass { color: #3fbf3f; }
+  :root:not([data-theme="light"]) .check.fail { color: #e56a6a; }
+  :root:not([data-theme="light"]) .check.look { color: var(--warning); }
+  :root:not([data-theme="light"]) .t4 { color: #3fbf3f; }
+  :root:not([data-theme="light"]) .t3 { color: #6fc4dd; }
+  :root:not([data-theme="light"]) .t2 { color: #8fb0f0; }
+  :root:not([data-theme="light"]) .t0 { color: var(--warning); }
+}
+
+/* --- findings --- */
+.finding {
+  border-left: 3px solid currentColor; padding: .55rem 0 .55rem .85rem;
+  margin: 0 0 1rem; break-inside: avoid;
+}
+.f-head { margin: 0; font-weight: 650; color: var(--ink); }
+.f-head .mark { font-weight: 700; margin-right: .4rem; }
+.f-word {
+  font-size: .66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  margin-right: .55rem; padding: .08rem .38rem; border-radius: 4px;
+  border: 1px solid currentColor;
+}
+.f-detail { margin: .3rem 0 0; color: var(--ink-2); max-width: 46rem; }
+.evidence {
+  margin: .35rem 0 0; font-size: .78rem; color: var(--ink-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.finding.critical { color: #b02a2a; }
+.finding.warn     { color: #8a6000; }
+.finding.info     { color: var(--ink-3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .finding.critical { color: #e56a6a; }
+  :root:not([data-theme="light"]) .finding.warn     { color: var(--warning); }
+}
+
+/* --- legend --- */
+.legend { display: grid; grid-template-columns: auto 1fr; gap: .35rem .8rem; margin: 0; }
+.legend dt { margin: 0; }
+.legend dd { margin: 0; color: var(--ink-2); font-size: .88rem; }
+
+/* --- footer --- */
+.disclaimer {
+  margin-top: 2.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
+  color: var(--ink-2); font-size: .88rem; break-inside: avoid;
+}
+.disclaimer strong { color: var(--ink); }
+.fine { color: var(--ink-3); font-size: .8rem; }
+.plain li { padding: .3rem 0; color: var(--ink-2); border-bottom: 1px solid var(--line); }
+
+/* --- print --- */
+@page { margin: 16mm 14mm; }
+@media print {
+  :root {
+    color-scheme: light;
+    --surface: #fff; --surface-2: #fff; --line: #ccc;
+    --ink: #000; --ink-2: #333; --ink-3: #555;
+  }
+  body { font-size: 10.5pt; background: #fff; }
+  .page { max-width: none; padding: 0; }
+  .block { break-inside: auto; }
+  .block h2 { break-after: avoid; }
+  .card, .finding, .check, .disclaimer { break-inside: avoid; }
+  .cards { grid-template-columns: 1fr 1fr; }
+  /* Browsers drop backgrounds by default, which would erase every meter. */
+  .track, .fill, .badge, .chip { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  a[href]::after { content: ""; }
+}
+REFURBMAN_CSS
+  printf '\n</style>\n</head>\n<body>\n<main class="page">\n'
+
+  # --- masthead ---
+  printf '<header class="masthead"><div class="brand">RefurbMan</div>\n'
+  printf '<h1>%s</h1>\n' "$title"
+  [ -n "$M_CHASSIS" ] && printf '<p class="sub">%s</p>\n' "$(html_esc "$M_CHASSIS")"
+  printf '<p class="stamp">Checked %s &middot; RefurbMan shell &middot; %s scan</p>\n</header>\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$([ "$PRIVILEGED" = 1 ] && echo full || echo limited)"
+
+  # --- condition ---
+  if [ -s "$DRIVE_FILE" ] || [ -s "$BATT_FILE" ]; then
+    printf '<section class="block"><h2>Condition of the parts that wear out</h2><div class="cards">\n'
+    while IFS="$SEP" read -r model bytes rot fw locked wear hours temp passed reall pend uncorr crc media written; do
+      IFS="$SEP" read -r verdict percent headline < <(
+        assess_drive "$model" "$locked" "$wear" "$hours" "$passed" "$reall" "$pend" "$uncorr" "$crc" "$media")
+      printf '<article class="card v-%s"><div class="card-top"><h3>%s</h3>%s</div>\n' \
+        "$verdict" "$(html_esc "$model")" "$(html_badge "$verdict")"
+      html_meter "Life remaining" "$percent" "$verdict"
+      printf '<p class="headline">%s</p>\n<dl class="facts">\n' "$(html_esc "$headline")"
+      html_row "Capacity" "$(fmt_bytes "$bytes")" 3 KERNEL
+      case "${rot:-}" in 0) html_row "Type" "Solid state" 3 KERNEL ;; 1) html_row "Type" "Hard disk" 3 KERNEL ;; esac
+      [ -n "$hours" ]   && html_row "Powered on for" "$(fmt_hours "$hours")" 4 "DEVICE FIRMWARE"
+      [ -n "$written" ] && html_row "Total written" "$(fmt_bytes "$written")" 4 "DEVICE FIRMWARE"
+      [ -n "$temp" ]    && html_row "Temperature" "$temp" 4 "DEVICE FIRMWARE" "C"
+      printf '</dl></article>\n'
+    done < "$DRIVE_FILE"
+
+    while IFS="$SEP" read -r model mfr tech cycles health dwh nwh status; do
+      IFS="$SEP" read -r verdict percent headline < <(assess_battery "$model" "$health" "$cycles")
+      printf '<article class="card v-%s"><div class="card-top"><h3>%s</h3>%s</div>\n' \
+        "$verdict" "$(html_esc "$model")" "$(html_badge "$verdict")"
+      html_meter "Capacity remaining" "$percent" "$verdict"
+      printf '<p class="headline">%s</p>\n<dl class="facts">\n' "$(html_esc "$headline")"
+      [ -n "$cycles" ] && html_row "Charge cycles" "$cycles" 4 "DEVICE FIRMWARE"
+      html_row "Capacity when new" "$dwh" 4 "DEVICE FIRMWARE" "Wh"
+      html_row "Capacity now" "$nwh" 4 "DEVICE FIRMWARE" "Wh"
+      html_row "Chemistry" "$tech" 4 "DEVICE FIRMWARE"
+      printf '</dl></article>\n'
+    done < "$BATT_FILE"
+    printf '</div></section>\n'
+  fi
+
+  # --- identity ---
+  printf '<section class="block"><h2>This machine</h2><dl class="facts wide">\n'
+  html_row "Manufacturer"  "$M_VENDOR"  2 "SYSTEM FIRMWARE"
+  html_row "Model"         "$M_MODEL"   2 "SYSTEM FIRMWARE"
+  html_row "Family"        "$M_FAMILY"  2 "SYSTEM FIRMWARE"
+  html_row "SKU"           "$M_SKU"     2 "SYSTEM FIRMWARE"
+  html_row "Serial number" "$M_SERIAL"  2 "SYSTEM FIRMWARE"
+  html_row "Form"          "$M_CHASSIS" 2 "SYSTEM FIRMWARE"
+  html_row "Motherboard"   "$M_BOARD"   2 "SYSTEM FIRMWARE"
+  html_row "BIOS"          "$M_BIOS"    2 "SYSTEM FIRMWARE"
+  printf '</dl></section>\n'
+
+  # --- processor ---
+  printf '<section class="block"><h2>Processor</h2><dl class="facts wide">\n'
+  html_row "Processor"      "$CPU_MODEL"        4 "DEVICE FIRMWARE"
+  html_row "Made by"        "$CPU_VENDOR"       4 "DEVICE FIRMWARE"
+  html_row "Cores"          "${CPU_CORES:-}"    3 KERNEL
+  html_row "Threads"        "${CPU_THREADS:-}"  3 KERNEL
+  html_row "Maximum speed"  "${CPU_MAXMHZ:-}"   3 KERNEL "MHz"
+  html_row "Virtualised under" "$CPU_HYPERVISOR" 4 "DEVICE FIRMWARE"
+  printf '</dl></section>\n'
+
+  # --- memory ---
+  printf '<section class="block"><h2>Memory</h2><dl class="facts wide">\n'
+  [ "$MEM_SMBIOS_BYTES" -gt 0 ] && html_row "Installed" "$(fmt_bytes "$MEM_SMBIOS_BYTES")" 2 "SYSTEM FIRMWARE"
+  html_row "System can use" "$(fmt_bytes "${MEM_KERNEL_BYTES:-0}")" 3 KERNEL
+  [ "$MEM_SLOTS_TOTAL" -gt 0 ] && html_row "Slots in use" "$MEM_SLOTS_USED of $MEM_SLOTS_TOTAL" 2 "SYSTEM FIRMWARE"
+  printf '</dl>\n'
+  if [ "$MEM_SLOTS_TOTAL" -gt 0 ]; then
+    while IFS="$SEP" read -r locator bytes type speed mfr part; do
+      [ "${bytes:-0}" -eq 0 ] && continue
+      printf '<h3 class="sub-head">%s</h3><dl class="facts wide">\n' "$(html_esc "$locator")"
+      html_row "Size" "$(fmt_bytes "$bytes")" 2 "SYSTEM FIRMWARE"
+      html_row "Type" "$type" 2 "SYSTEM FIRMWARE"
+      html_row "Running at" "$speed" 2 "SYSTEM FIRMWARE"
+      html_row "Made by" "$mfr" 2 "SYSTEM FIRMWARE"
+      html_row "Part number" "$part" 2 "SYSTEM FIRMWARE"
+      printf '</dl>\n'
+    done < "$MEM_SLOTS_FILE"
+  fi
+  printf '</section>\n'
+
+  # --- findings ---
+  printf '<section class="block"><h2>What you should know</h2>\n'
+  if [ ! -s "$FINDINGS_FILE" ]; then
+    printf '<p class="lede">Nothing of concern was found.</p></section>\n'
+  else
+    printf '<ul class="findings">\n'
+    for sev in critical warn info; do
+      while IFS="$SEP" read -r s title detail evidence; do
+        [ "$s" = "$sev" ] || continue
+        case "$s" in
+          critical) mark='&#10007;'; word='Serious' ;;
+          warn)     mark='&#33;';    word='Worth knowing' ;;
+          *)        mark='&#105;';   word='For information' ;;
+        esac
+        printf '<li class="finding %s"><p class="f-head"><span class="mark" aria-hidden="true">%s</span><span class="f-word">%s</span>%s</p><p class="f-detail">%s</p>' \
+          "$s" "$mark" "$word" "$(html_esc "$title")" "$(html_esc "$detail")"
+        [ -n "$evidence" ] && printf '<p class="evidence">%s</p>' "$(html_esc "$evidence")"
+        printf '</li>\n'
+      done < "$FINDINGS_FILE"
+    done
+    printf '</ul></section>\n'
+  fi
+
+  # --- provenance ---
+  printf '<section class="block"><h2>Where these readings came from</h2>\n'
+  printf '<dl class="legend">\n'
+  printf '<dt><span class="chip t4">DEVICE FIRMWARE</span></dt><dd>The part itself reported this. Changing it means reflashing the part.</dd>\n'
+  printf '<dt><span class="chip t3">KERNEL</span></dt><dd>The operating system kernel'"'"'s own view of the hardware.</dd>\n'
+  printf '<dt><span class="chip t2">SYSTEM FIRMWARE</span></dt><dd>The motherboard firmware. Changing it means reflashing the BIOS.</dd>\n'
+  printf '</dl></section>\n'
+
+  printf '<footer class="disclaimer"><p><strong>What this report is, and is not.</strong> '
+  printf 'It raises the effort needed to deceive you from editing a text file to reflashing '
+  printf 'firmware. It is not proof. There is no signing chain here and no hardware '
+  printf 'attestation, so somebody with deep enough access to this machine can still lie to '
+  printf 'it. Treat this as strong evidence rather than a guarantee, and weigh it against how '
+  printf 'the machine actually behaves.</p>\n'
+  printf '<p class="fine">Generated by RefurbMan, which reads from the operating system '
+  printf 'kernel, the motherboard firmware tables, and the parts themselves.</p></footer>\n'
+  printf '</main>\n</body>\n</html>\n'
+}
+
+# ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
 
@@ -664,6 +1112,14 @@ if [ "$HAVE_SMARTCTL" = 0 ]; then
     "Drive wear is read using smartctl, which is not present on this machine. Install it to see how much life the drives have left. On Fedora: sudo dnf install smartmontools. On Debian or Ubuntu: sudo apt install smartmontools."
 fi
 
+if [ -n "$HTML_OUT" ]; then
+  emit_html > "$HTML_OUT"
+  printf 'Report written to %s\n' "$HTML_OUT"
+  printf 'Open it in a browser and choose Print, then Save as PDF, for a PDF copy.\n'
+  rm -f "$MEM_SLOTS_FILE" "$BATT_FILE" "$DRIVE_FILE" 2>/dev/null
+  exit 0
+fi
+
 if [ "$JSON" = 1 ]; then
   # Emitted by hand rather than with a JSON library so the script keeps its
   # promise of needing nothing installed.
@@ -680,7 +1136,7 @@ if [ "$JSON" = 1 ]; then
     "${MEM_KERNEL_BYTES:-null}" "$MEM_SMBIOS_BYTES" "$MEM_SLOTS_USED" "$MEM_SLOTS_TOTAL"
   printf '  "drives": [\n'
   first=1
-  while IFS="$SEP" read -r model bytes rot fw locked wear hours temp passed reall pend uncorr crc media; do
+  while IFS="$SEP" read -r model bytes rot fw locked wear hours temp passed reall pend uncorr crc media written; do
     [ "$first" = 1 ] || printf ',\n'; first=0
     IFS="$SEP" read -r v p _ < <(assess_drive "$model" "$locked" "$wear" "$hours" "$passed" "$reall" "$pend" "$uncorr" "$crc" "$media")
     printf '    {"model": "%s", "bytes": %s, "verdict": "%s", "lifeRemaining": %s, "powerOnHours": %s}' \
@@ -688,7 +1144,7 @@ if [ "$JSON" = 1 ]; then
   done < "$DRIVE_FILE"
   printf '\n  ],\n  "batteries": [\n'
   first=1
-  while IFS="$SEP" read -r model mfr tech cycles health dwh nwh status path; do
+  while IFS="$SEP" read -r model mfr tech cycles health dwh nwh status; do
     [ "$first" = 1 ] || printf ',\n'; first=0
     IFS="$SEP" read -r v p _ < <(assess_battery "$model" "$health" "$cycles")
     printf '    {"model": "%s", "verdict": "%s", "healthPercent": %s, "cycleCount": %s}' \
@@ -701,12 +1157,14 @@ fi
 banner
 rule "This machine"
 echo
-[ -n "$M_VENDOR$M_MODEL" ] && printf '  %s%s %s%s\n' "$BOLD" "$M_VENDOR" "$M_MODEL" "$R"
+[ -n "$MACHINE_TITLE" ] && printf '  %s%s%s\n' "$BOLD" "$MACHINE_TITLE" "$R"
 [ -n "$M_CHASSIS" ] && printf '  %s%s%s\n' "$GRAY" "$M_CHASSIS" "$R"
 echo
 row "Manufacturer"  "$M_VENDOR"
 row "Model"         "$M_MODEL"
 row "Serial number" "$M_SERIAL"
+row "Family"        "$M_FAMILY"
+row "SKU"           "$M_SKU"
 row "Motherboard"   "$M_BOARD"
 row "BIOS"          "$M_BIOS"
 if [ -z "$M_SERIAL" ] && [ "$PRIVILEGED" = 0 ]; then
@@ -717,6 +1175,7 @@ echo
 rule "Processor"
 echo
 row "Model"       "$CPU_MODEL" device
+row "Vendor"      "$CPU_VENDOR" device
 row "Cores"       "${CPU_CORES:-}" kernel
 row "Threads"     "${CPU_THREADS:-}" kernel
 row "Rated speed" "${CPU_MAXMHZ:-}" kernel "MHz"
@@ -753,7 +1212,7 @@ rule "Storage"
 if [ ! -s "$DRIVE_FILE" ]; then
   echo; printf '  %sNo drives reported.%s\n' "$GRAY" "$R"
 fi
-while IFS="$SEP" read -r model bytes rot fw locked wear hours temp passed reall pend uncorr crc media; do
+while IFS="$SEP" read -r model bytes rot fw locked wear hours temp passed reall pend uncorr crc media written; do
   IFS="$SEP" read -r verdict percent headline < <(
     assess_drive "$model" "$locked" "$wear" "$hours" "$passed" "$reall" "$pend" "$uncorr" "$crc" "$media")
   echo
@@ -770,6 +1229,7 @@ while IFS="$SEP" read -r model bytes rot fw locked wear hours temp passed reall 
   row "Powered on for"   "$(fmt_hours "${hours:-0}")" device
   row "Temperature"      "${temp:-}" device "C"
   [ -n "$wear" ] && row "Life used" "$wear" device "%"
+  [ -n "$written" ] && row "Total written" "$(fmt_bytes "$written")" device
   case "${passed:-}" in
     1) row "Drive self-check" "Passed" device ;;
     0) row "Drive self-check" "FAILED" device ;;
@@ -779,7 +1239,7 @@ done < "$DRIVE_FILE"
 if [ -s "$BATT_FILE" ]; then
   echo
   rule "Battery"
-  while IFS="$SEP" read -r model mfr tech cycles health dwh nwh status path; do
+  while IFS="$SEP" read -r model mfr tech cycles health dwh nwh status; do
     IFS="$SEP" read -r verdict percent headline < <(assess_battery "$model" "$health" "$cycles")
     echo
     printf '  %s%s%s\n' "$BOLD" "$model" "$R"

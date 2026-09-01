@@ -26,6 +26,17 @@ jobs:
       # engine is run for real here and asked to produce a report.
       - name: Run the probe
         run: cargo run -p refurbman-probe --bin refurbman-probe -- --json
+      - name: Export an HTML report
+        run: cargo run -p refurbman-probe --bin refurbman-probe -- --html report.html
+      - name: Uploaded report must be self-contained
+        shell: bash
+        run: |
+          test -s report.html
+          # An external reference would break the report offline, which is
+          # exactly where it gets read.
+          if grep -qE 'src=|https?://' report.html; then
+            echo "::error::the report pulled in something external"; exit 1
+          fi
 
   shell:
     name: Shell script
@@ -45,6 +56,16 @@ jobs:
         run: sudo ./scripts/refurbman.sh --no-color
       - name: JSON output must parse
         run: ./scripts/refurbman.sh --json | python3 -m json.tool > /dev/null
+      - name: HTML export
+        run: |
+          ./scripts/refurbman.sh --html report.html
+          test -s report.html
+          grep -q '</html>' report.html
+      # The scripts must stand alone, so each carries its own copy of the
+      # stylesheet. This makes that copy mechanical rather than manual: if it
+      # has drifted from assets/report.css, the build says so.
+      - name: Embedded stylesheets are in step with assets/report.css
+        run: python3 scripts/sync-report-css.py --check
 
   powershell:
     name: PowerShell script
@@ -70,6 +91,12 @@ jobs:
       - name: JSON output must parse
         shell: pwsh
         run: ./scripts/RefurbMan.ps1 -Json | ConvertFrom-Json | Out-Null
+      - name: HTML export
+        shell: pwsh
+        run: |
+          ./scripts/RefurbMan.ps1 -Html report.html
+          if (-not (Test-Path report.html)) { throw 'no report written' }
+          if ((Get-Content report.html -Raw) -notmatch '</html>') { throw 'report is truncated' }
 
   secrets:
     name: No hardware serials in fixtures
