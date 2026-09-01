@@ -13,7 +13,7 @@
 use smbioslib::*;
 
 use crate::fact::{firmware, Fact};
-use crate::report::{Component, Facts};
+use crate::report::{human_bytes, Component, Facts};
 
 /// Strings OEMs leave in SMBIOS when they cannot be bothered to fill a field.
 ///
@@ -227,11 +227,17 @@ pub fn interpret(data: &SMBiosData) -> Smbios {
                     "sizeBytes",
                     firmware(bytes, "smbios:type17.size").unit("bytes"),
                 );
+                c.push("size", firmware(human_bytes(bytes), "smbios:type17.size"));
                 c.push("slot", firmware(locator, "smbios:type17.device_locator"));
+                // The bank locator names the channel, which is how two slots
+                // with identical device locators are told apart.
+                if let Some(bank) = s(&mem.bank_locator()) {
+                    c.push("bank", firmware(bank, "smbios:type17.bank_locator"));
+                }
                 if let Some(t) = mem.memory_type() {
                     c.push(
                         "type",
-                        firmware(format!("{:?}", t.value), "smbios:type17.memory_type"),
+                        firmware(memory_type_name(&t.value), "smbios:type17.memory_type"),
                     );
                 }
                 if let Some(sp) = mem.speed() {
@@ -262,6 +268,11 @@ pub fn interpret(data: &SMBiosData) -> Smbios {
         }
     }
 
+    // Soldered memory routinely gives every slot the same device locator, so
+    // "Bottom - on board" appears twice and the reader cannot tell which stick
+    // is which. Where that happens, fall back to the channel name.
+    disambiguate_slots(&mut out.memory_slots);
+
     if out.slots_total > 0 {
         out.system.insert(
             "memorySlotsTotal".into(),
@@ -274,6 +285,48 @@ pub fn interpret(data: &SMBiosData) -> Smbios {
     }
 
     out
+}
+
+/// Give slots that share a name something to tell them apart by.
+fn disambiguate_slots(slots: &mut [Component]) {
+    use std::collections::BTreeMap;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for c in slots.iter() {
+        *counts.entry(c.name.clone()).or_default() += 1;
+    }
+    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+    for c in slots.iter_mut() {
+        if counts.get(&c.name).copied().unwrap_or(0) < 2 {
+            continue;
+        }
+        let n = seen.entry(c.name.clone()).or_default();
+        *n += 1;
+        let nth = *n;
+        // Prefer the channel the firmware reports, and number them only if it
+        // did not give one.
+        let suffix = match c.facts.get("bank").map(|f| &f.value) {
+            Some(crate::fact::Value::Text(bank)) => bank.clone(),
+            _ => format!("slot {nth}"),
+        };
+        c.name = format!("{} ({})", c.name, suffix);
+    }
+}
+
+/// SMBIOS memory type, spelled the way the industry spells it.
+///
+/// The generated enum debug-prints as `Ddr4`, which looks like a typo on a
+/// report someone is going to show to a seller.
+fn memory_type_name(t: &MemoryDeviceType) -> String {
+    let raw = format!("{t:?}");
+    let upper = raw.to_ascii_uppercase();
+    for prefix in [
+        "LPDDR", "DDR", "SDRAM", "DRAM", "SRAM", "EDO", "EEPROM", "FLASH", "ROM",
+    ] {
+        if upper.starts_with(prefix) {
+            return upper;
+        }
+    }
+    raw
 }
 
 /// Size of one memory device in bytes.

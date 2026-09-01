@@ -72,6 +72,86 @@ impl Finding {
     }
 }
 
+/// Which readings a section shows, and in what order.
+///
+/// Facts are stored alphabetically so exports stay byte-stable, which is the
+/// wrong order to read in: it puts "Bytes written 34479896576000" above the
+/// drive's remaining life. This list fixes the order and, just as importantly,
+/// leaves things out. A stepping number, a raw byte count that already has a
+/// readable twin, and a spare-block threshold are all noise to the person this
+/// report is written for. Everything omitted here is still in the JSON export.
+///
+/// The terminal and the HTML report both read from this, so the two can never
+/// disagree about what matters.
+pub fn display_fields(kind: &str) -> &'static [(&'static str, &'static str)] {
+    match kind {
+        "cpu" => &[
+            ("model", "Processor"),
+            ("vendor", "Made by"),
+            ("cores", "Cores"),
+            ("threads", "Threads"),
+            ("maxFrequencyMhz", "Maximum speed"),
+            ("hypervisor", "Virtualised under"),
+        ],
+        "memory" => &[
+            ("size", "Size"),
+            ("type", "Type"),
+            ("configuredSpeedMts", "Running at"),
+            ("manufacturer", "Made by"),
+            ("partNumber", "Part number"),
+        ],
+        "storage" => &[
+            ("capacity", "Capacity"),
+            ("kind", "Type"),
+            ("protocol", "Connection"),
+            ("powerOnFor", "Powered on for"),
+            ("totalWritten", "Total written"),
+            ("lifeUsedPercent", "Life used"),
+            ("temperatureC", "Temperature"),
+            ("selfAssessment", "Drive self-check"),
+            ("reallocatedSectors", "Replaced areas"),
+            ("pendingSectors", "Areas it cannot read"),
+            ("uncorrectableSectors", "Unrecoverable areas"),
+            ("mediaErrors", "Unrecoverable errors"),
+            ("powerCycles", "Times switched on"),
+            ("firmware", "Firmware"),
+        ],
+        "battery" => &[
+            ("designCapacityWh", "Capacity when new"),
+            ("currentCapacityWh", "Capacity now"),
+            ("cycleCount", "Charge cycles"),
+            ("technology", "Chemistry"),
+            ("manufacturer", "Made by"),
+            ("chargeNowPercent", "Charged right now"),
+            ("status", "Currently"),
+        ],
+        _ => &[],
+    }
+}
+
+/// Render a byte count at the scale people actually use.
+///
+/// Decimal units, because that is what drives are sold in and what a buyer is
+/// comparing against the listing. Memory is conventionally quoted in powers of
+/// two, so an 8 GiB stick reads as 8.6 GB here; the exact byte count is kept
+/// alongside for anyone who needs it.
+pub fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = bytes as f64;
+    let mut i = 0;
+    while v >= 1000.0 && i < UNITS.len() - 1 {
+        v /= 1000.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{bytes} B")
+    } else if v >= 100.0 {
+        format!("{v:.0} {}", UNITS[i])
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
+}
+
 /// An ordered bag of facts. `BTreeMap` so exports are byte-stable across runs,
 /// which lets a buyer diff two scans of the same machine.
 pub type Facts = BTreeMap<String, Fact>;

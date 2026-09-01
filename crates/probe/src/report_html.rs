@@ -21,7 +21,7 @@
 //! colour, and none of the three is load-bearing on its own.
 
 use crate::fact::{Fact, Trust, Value};
-use crate::report::{CheckStatus, Consumable, Report, Severity, Verdict};
+use crate::report::{display_fields, CheckStatus, Consumable, Report, Severity, Verdict};
 
 /// Render the whole report as one HTML document.
 pub fn render(r: &Report) -> String {
@@ -68,10 +68,14 @@ fn header(h: &mut String, r: &Report, machine: &str) {
         sub.push(format!("Serial {}", show(&f.value)));
     }
     if !sub.is_empty() {
-        h.push_str(&format!(
-            "<p class=\"sub\">{}</p>\n",
-            esc(&sub.join(" &middot; "))
-        ));
+        // Escape each part first, then join with the separator entity. Joining
+        // first would escape the entity's own ampersand and print it literally.
+        let joined = sub
+            .iter()
+            .map(|p| esc(p))
+            .collect::<Vec<_>>()
+            .join(" &middot; ");
+        h.push_str(&format!("<p class=\"sub\">{joined}</p>\n"));
     }
     h.push_str(&format!(
         "<p class=\"stamp\">Checked {} &middot; RefurbMan {} &middot; {} scan</p>\n",
@@ -114,19 +118,7 @@ fn card(h: &mut String, c: &Consumable) {
         h.push_str(&format!("<p class=\"headline\">{}</p>\n", esc(&c.headline)));
     }
 
-    // Only the handful of readings a buyer actually weighs. The full set is in
-    // the JSON export for anyone who wants it.
-    let interesting: &[(&str, &str)] = &[
-        ("capacity", "Capacity"),
-        ("kind", "Type"),
-        ("powerOnHours", "Powered on for"),
-        ("totalWritten", "Total written"),
-        ("cycleCount", "Charge cycles"),
-        ("designCapacityWh", "Capacity when new"),
-        ("currentCapacityWh", "Capacity now"),
-        ("temperatureC", "Temperature"),
-    ];
-    let rows: Vec<String> = interesting
+    let rows: Vec<String> = display_fields(&c.kind)
         .iter()
         .filter_map(|(k, label)| c.facts.get(*k).map(|f| fact_row(label, f)))
         .collect();
@@ -178,7 +170,7 @@ fn hardware(h: &mut String, r: &Report) {
 
         if kind == "memory" {
             let totals: Vec<String> = [
-                ("memoryInstalledBytes", "Installed"),
+                ("memoryInstalled", "Installed"),
                 ("memoryUsable", "System can use"),
                 ("memorySlotsPopulated", "Slots in use"),
                 ("memorySlotsTotal", "Slots on the board"),
@@ -200,7 +192,7 @@ fn hardware(h: &mut String, r: &Report) {
                 h.push_str(&format!("<h3 class=\"sub-head\">{}</h3>\n", esc(&c.name)));
             }
             h.push_str("<dl class=\"facts wide\">\n");
-            for (key, label) in fields_for(kind) {
+            for (key, label) in display_fields(kind) {
                 if let Some(f) = c.facts.get(*key) {
                     h.push_str(&fact_row(label, f));
                 }
@@ -208,35 +200,6 @@ fn hardware(h: &mut String, r: &Report) {
             h.push_str("</dl>\n");
         }
         h.push_str("</section>\n");
-    }
-}
-
-/// Which readings a section shows, in the order a reader wants them.
-///
-/// Facts are stored alphabetically so exports stay byte-stable, which is the
-/// wrong order to read in: it puts "Family 25" above the processor's own name.
-/// The low-level identifiers are deliberately absent, because a stepping number
-/// means nothing to someone deciding whether to buy a laptop. Every fact is
-/// still in the JSON export for anyone who wants it.
-fn fields_for(kind: &str) -> &'static [(&'static str, &'static str)] {
-    match kind {
-        "cpu" => &[
-            ("model", "Processor"),
-            ("vendor", "Made by"),
-            ("cores", "Cores"),
-            ("threads", "Threads"),
-            ("maxFrequencyMhz", "Maximum speed"),
-            ("hypervisor", "Virtualised under"),
-        ],
-        "memory" => &[
-            ("sizeBytes", "Size"),
-            ("type", "Type"),
-            ("configuredSpeedMts", "Running at"),
-            ("speedMts", "Rated speed"),
-            ("manufacturer", "Made by"),
-            ("partNumber", "Part number"),
-        ],
-        _ => &[],
     }
 }
 
@@ -583,6 +546,17 @@ mod tests {
         assert!(!html.contains("https://"));
         assert!(!html.contains("<script"));
         assert!(html.contains("<style>"));
+    }
+
+    #[test]
+    fn the_subtitle_separator_is_not_double_escaped() {
+        let mut r = report_with(vec![]);
+        r.system.insert("chassis".into(), device("Notebook", "t"));
+        r.system
+            .insert("serialNumber".into(), device("ABC123", "t"));
+        let html = render(&r);
+        assert!(html.contains("Notebook &middot; Serial ABC123"));
+        assert!(!html.contains("&amp;middot;"));
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! script it and continuous integration can assert on it.
 
 use refurbman_probe::fact::{Trust, Value};
-use refurbman_probe::report::{CheckStatus, Report, Severity, Verdict};
+use refurbman_probe::report::{display_fields, CheckStatus, Report, Severity, Verdict};
 use refurbman_probe::{scan, VERSION};
 
 fn main() {
@@ -237,7 +237,7 @@ fn render(r: &Report, color: bool) {
         rule(&p, title);
         if kind == "memory" {
             println!();
-            for key in ["memoryInstalledBytes", "memoryUsable"] {
+            for key in ["memoryInstalled", "memoryUsable"] {
                 if let Some(f) = r.system.get(key) {
                     let label = if key == "memoryUsable" {
                         "System can use"
@@ -253,11 +253,10 @@ fn render(r: &Report, color: bool) {
             if kind == "memory" {
                 println!("  {}", p.bold(&c.name));
             }
-            for (k, f) in &c.facts {
-                if k == "slot" {
-                    continue;
+            for (key, label) in display_fields(kind) {
+                if let Some(f) = c.facts.get(*key) {
+                    row(&p, label, f);
                 }
-                row(&p, &humanise_key(k), f);
             }
         }
     }
@@ -283,11 +282,10 @@ fn render(r: &Report, color: bool) {
                 "Life remaining"
             };
             gauge(&p, label, c.percent, c.verdict);
-            for (k, f) in &c.facts {
-                if k == "model" || k.ends_with("Bytes") || k == "lifeRemainingPercent" {
-                    continue;
+            for (key, label) in display_fields(kind) {
+                if let Some(f) = c.facts.get(*key) {
+                    row(&p, label, f);
                 }
-                row(&p, &humanise_key(k), f);
             }
         }
     }
@@ -393,22 +391,6 @@ fn render(r: &Report, color: bool) {
         println!("  {}", p.dim(l));
     }
     println!();
-}
-
-/// Turn a camelCase fact key into something a person would read.
-fn humanise_key(k: &str) -> String {
-    let mut out = String::new();
-    for (i, ch) in k.chars().enumerate() {
-        if i == 0 {
-            out.extend(ch.to_uppercase());
-        } else if ch.is_uppercase() {
-            out.push(' ');
-            out.extend(ch.to_lowercase());
-        } else {
-            out.push(ch);
-        }
-    }
-    out
 }
 
 const BANNER: &str = r"    ____       ____           __    __  ___

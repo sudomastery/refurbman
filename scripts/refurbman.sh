@@ -297,12 +297,15 @@ collect_memory() {
   command -v dmidecode >/dev/null 2>&1 || return
   [ "$PRIVILEGED" = 1 ] || return
 
-  local size locator type speed mfr part
+  local size locator bank type speed mfr part
   while IFS= read -r line; do
     case "$line" in
-      "Memory Device")  size=""; locator=""; type=""; speed=""; mfr=""; part="" ;;
+      "Memory Device")  size=""; locator=""; bank=""; type=""; speed=""; mfr=""; part="" ;;
       *"Size: "*)       [ -z "$size" ] && size="${line#*Size: }" ;;
-      *"Locator: "*)    case "$line" in *"Bank Locator"*) ;; *) locator="${line#*Locator: }" ;; esac ;;
+      *"Locator: "*)    case "$line" in
+                          *"Bank Locator"*) bank="$(clean "${line#*Bank Locator: }")" ;;
+                          *) locator="${line#*Locator: }" ;;
+                        esac ;;
       *"Type: "*)       case "$line" in *"Type Detail"*|*"Error Correction Type"*) ;; *) [ -z "$type" ] && type="${line#*Type: }" ;; esac ;;
       *"Configured Memory Speed: "*) speed="${line#*Configured Memory Speed: }" ;;
       *"Speed: "*)      [ -z "$speed" ] && speed="${line#*Speed: }" ;;
@@ -312,16 +315,29 @@ collect_memory() {
         [ -z "${locator:-}" ] && continue
         MEM_SLOTS_TOTAL=$(( MEM_SLOTS_TOTAL + 1 ))
         local bytes=0
+        # dmidecode switched to IEC units in 3.6, so a stick reads "4 GiB"
+        # there and "4 GB" on older releases. Both denote the same
+        # power-of-two figure. Missing this is why soldered memory was
+        # reported as empty slots.
         case "${size:-}" in
           "No Module Installed"|""|"Unknown") bytes=0 ;;
-          *" GB") bytes=$(( ${size% GB} * 1024 * 1024 * 1024 )) ;;
-          *" MB") bytes=$(( ${size% MB} * 1024 * 1024 )) ;;
+          *" GiB") bytes=$(( ${size% GiB} * 1024 * 1024 * 1024 )) ;;
+          *" MiB") bytes=$(( ${size% MiB} * 1024 * 1024 )) ;;
+          *" TiB") bytes=$(( ${size% TiB} * 1024 * 1024 * 1024 * 1024 )) ;;
+          *" GB")  bytes=$(( ${size% GB} * 1024 * 1024 * 1024 )) ;;
+          *" MB")  bytes=$(( ${size% MB} * 1024 * 1024 )) ;;
+          *" TB")  bytes=$(( ${size% TB} * 1024 * 1024 * 1024 * 1024 )) ;;
         esac
         if [ "$bytes" -gt 0 ]; then
           MEM_SLOTS_USED=$(( MEM_SLOTS_USED + 1 ))
           MEM_SMBIOS_BYTES=$(( MEM_SMBIOS_BYTES + bytes ))
         fi
-        printf '%s\037%s\037%s\037%s\037%s\037%s\n' "$locator" "$bytes" "${type:-}" "${speed:-}" "${mfr:-}" "${part:-}" \
+        # Soldered memory routinely reuses one device locator for every slot,
+        # so "Bottom - on board" appears twice and the reader cannot tell which
+        # stick is which. The channel name disambiguates them.
+        local label="$locator"
+        [ -n "${bank:-}" ] && label="$locator ($bank)"
+        printf '%s\037%s\037%s\037%s\037%s\037%s\n' "$label" "$bytes" "${type:-}" "${speed:-}" "${mfr:-}" "${part:-}" \
           >> "$MEM_SLOTS_FILE"
         locator=""
         ;;
@@ -1192,16 +1208,19 @@ echo
 row "System can see" "$(fmt_bytes "${MEM_KERNEL_BYTES:-0}")" kernel
 if [ "$MEM_SLOTS_TOTAL" -gt 0 ]; then
   echo
+  # Slot labels can run long once the channel name is appended, so they get
+  # their own line rather than pushing the value column out of alignment.
   while IFS="$SEP" read -r locator bytes type speed mfr part; do
     if [ "${bytes:-0}" -eq 0 ]; then
-      printf '  %-22s %s%s%s\n' "$locator" "$GRAY" "empty" "$R"
+      printf '  %s%s%s  %s%s%s\n' "$BOLD" "$locator" "$R" "$GRAY" "empty" "$R"
       continue
     fi
+    printf '  %s%s%s\n' "$BOLD" "$locator" "$R"
     line="$(fmt_bytes "$bytes")"
     [ -n "$type" ] && line="$line $type"
     case "$speed" in ""|"Unknown") ;; *) line="$line at $speed" ;; esac
-    row "$locator" "$line"
-    [ -n "$mfr$part" ] && note "$(printf '%s %s' "$mfr" "$part" | sed 's/^ //; s/ $//')"
+    row "  Size" "$line"
+    [ -n "$mfr$part" ] && row "  Part" "$(printf '%s %s' "$mfr" "$part" | sed 's/^ //; s/ $//')"
   done < "$MEM_SLOTS_FILE"
 elif [ "$PRIVILEGED" = 0 ]; then
   note "per-slot detail needs sudo"

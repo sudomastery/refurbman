@@ -6,7 +6,7 @@
 //! shows the machine's storage rather than an empty section.
 
 use crate::fact::derived;
-use crate::report::{Consumable, Facts};
+use crate::report::{human_bytes, Consumable, Facts};
 use crate::smart::{parse, Smartctl};
 
 pub struct Storage {
@@ -179,23 +179,6 @@ fn kernel_drives() -> Vec<(String, Consumable)> {
     // On Windows smartctl enumerates the physical drives itself, and does so
     // without needing a second source for identity.
     Vec::new()
-}
-
-fn human_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut v = bytes as f64;
-    let mut i = 0;
-    while v >= 1000.0 && i < UNITS.len() - 1 {
-        v /= 1000.0;
-        i += 1;
-    }
-    if i == 0 {
-        format!("{bytes} B")
-    } else if v >= 100.0 {
-        format!("{v:.0} {}", UNITS[i])
-    } else {
-        format!("{v:.1} {}", UNITS[i])
-    }
 }
 
 /// Total storage across every drive found, for the summary line.

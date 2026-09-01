@@ -40,6 +40,13 @@ pub fn run() -> Report {
             "memoryInstalledBytes".into(),
             crate::fact::firmware(fw.memory_total_bytes, "smbios:type17 sum").unit("bytes"),
         );
+        system.insert(
+            "memoryInstalled".into(),
+            crate::fact::firmware(
+                crate::report::human_bytes(fw.memory_total_bytes),
+                "smbios:type17 sum",
+            ),
+        );
     }
 
     // --- operating system ---

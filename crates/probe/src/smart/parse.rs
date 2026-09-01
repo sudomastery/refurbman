@@ -148,10 +148,9 @@ pub fn drive(json: &Json, fallback_name: &str) -> Consumable {
             "powerOnHours",
             device(h, src("power_on_time.hours")).unit("hours"),
         );
-        c.push(
-            "powerOnYears",
-            derived(round1(h as f64 / 8760.0), "power on hours").unit("years"),
-        );
+        // "11512 hours" is a number; "1.3 years" is an answer to the question
+        // the reader is actually asking.
+        c.push("powerOnFor", derived(humanise_hours(h), "power on hours"));
     }
     if let Some(v) = u64_at(json, &["power_cycle_count"]) {
         c.push("powerCycles", device(v, src("power_cycle_count")));
@@ -168,7 +167,15 @@ pub fn drive(json: &Json, fallback_name: &str) -> Consumable {
         .and_then(|s| s.get("passed"))
         .and_then(Json::as_bool);
     if let Some(p) = passed {
-        c.push("selfAssessment", device(p, src("smart_status.passed")));
+        // A bare yes/no beside "Self assessment" is not a sentence anyone
+        // reads correctly under pressure.
+        c.push(
+            "selfAssessment",
+            device(
+                if p { "Passed" } else { "FAILED" },
+                src("smart_status.passed"),
+            ),
+        );
     }
 
     // Protocol-specific wear.
