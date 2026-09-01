@@ -9,8 +9,12 @@
 //! Tauri shell and the `refurbman-probe` CLI are both thin callers of
 //! [`scan`].
 
+pub mod battery;
+pub mod cpu;
 pub mod fact;
 pub mod report;
+pub mod platform;
+pub mod smbios;
 
 pub use fact::{Fact, Trust, Value};
 pub use report::{Component, Consumable, Finding, Report, Verdict};
