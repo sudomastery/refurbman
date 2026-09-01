@@ -123,9 +123,20 @@ brand string the processor itself returns to the `CPUID` instruction.
 
 ## Status
 
-Early development, but usable. The two scripts work today, the probe engine is
-built and tested, and the desktop application runs. Installers are produced by
-the release workflow on a version tag.
+Early development. What is verified, and what is not:
+
+- **The two scripts work today**, tested on real hardware both with and without
+  privileges, and the PowerShell one is exercised on a real Windows runner by
+  continuous integration on every push.
+- **The probe engine is built and tested**, including against this project's own
+  development machine with full device access.
+- **The desktop application compiles and is type-checked on both platforms**, and
+  its interface has been rendered and inspected against a report covering every
+  state. It has not yet been launched as a window on either platform, because the
+  machine it was written on lacks the GUI build dependencies. Treat it as
+  unproven until someone has actually opened it.
+- **Installers are produced by the release workflow** on a version tag. No
+  release has been cut yet, so the installers are also unproven.
 
 ## Licence
 
